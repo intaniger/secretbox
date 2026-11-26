@@ -18,7 +18,7 @@ A proof of concept. Encryption is [age](https://age-encryption.org) via [Typage]
 | Tiger makes the box "Finance 2026" | 1* | [1. Make a box](docs/01-create-box.md) |
 | Tiger opens the box later | 1 | [2. Open a box](docs/02-open-box.md) |
 | A member adds a note or a file. A form or script can too | 0 | [3. Add an item](docs/03-add-item.md) |
-| Tiger sends Nok an invite link | 0 | [4. Make an invite](docs/04-create-invite.md) |
+| Tiger sends Nok an invite link | 1 | [4. Make an invite](docs/04-create-invite.md) |
 | Nok opens the link and taps **Accept** | 1* | [5. Use an invite](docs/05-use-invite.md) |
 | Somebody opens a used or expired link | — | [6. Expired or used link](docs/06-invite-expired-or-reused.md) |
 | A member removes another member | 0 | [8. Security, §2](docs/08-security.md#2-removal-deletes-only-the-envelope) |

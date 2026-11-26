@@ -5,8 +5,12 @@ import { api, type BoxResponse } from "./api.ts";
 import * as keys from "./keys.ts";
 import { createPasskey, getPasskey } from "./passkey.ts";
 
-/** The open box. Lives only in this tab's memory, until the tab closes or "Lock". */
-type Opened = { boxId: string; credentialId: string; identity: string; access: string };
+/**
+ * The open box. Lives only in this tab's memory, until "Lock", the auto-lock
+ * in main.ts, or the tab closes. `key` is a non-extractable CryptoKey where the
+ * browser allows it (keys.holdBoxKey).
+ */
+type Opened = { boxId: string; credentialId: string } & keys.HeldBoxKey;
 let opened: Opened | null = null;
 
 export const openBoxId = () => opened?.boxId ?? null;
@@ -35,15 +39,15 @@ export type Box = {
 };
 
 const lockJson = async (recipient: string, value: unknown) => keys.toB64(await keys.lockTo(recipient, JSON.stringify(value)));
-const unlockJson = async <T>(identity: string, b64: string): Promise<T> =>
+const unlockJson = async <T>(identity: keys.Identity, b64: string): Promise<T> =>
   JSON.parse(await keys.unlockText([identity], keys.fromB64(b64)));
 
 /**
  * The server gives the box public key, and members lock data to it. The
  * browser holds the private key, so it can check that the two belong together.
  */
-async function checkPublicKey(identity: string, publicKey: string) {
-  if ((await keys.publicKeyOf(identity)) !== publicKey) {
+function checkPublicKey(ours: string, fromServer: string) {
+  if (ours !== fromServer) {
     throw Error("Vault Box sent the wrong key for this box, so it isn't safe to use. Don't add anything, and tell the other people in this box.");
   }
 }
@@ -57,10 +61,10 @@ function must(): Opened {
 export async function load(): Promise<Box> {
   const o = must();
   const r = await api.get<BoxResponse>(`/api/boxes/${o.boxId}`, o.access);
-  await checkPublicKey(o.identity, r.publicKey);
+  checkPublicKey(o.publicKey, r.publicKey);
   const members = await Promise.all(
     r.members.map(async (m) => ({
-      ...(await unlockJson<Person>(o.identity, m.nameLocked)),
+      ...(await unlockJson<Person>(o.key, m.nameLocked)),
       credentialId: m.credentialId,
       createdAt: m.createdAt,
       isMe: m.credentialId === o.credentialId,
@@ -68,7 +72,7 @@ export async function load(): Promise<Box> {
   );
   return {
     id: r.id,
-    name: await keys.unlockText([o.identity], keys.fromB64(r.nameLocked)),
+    name: await keys.unlockText([o.key], keys.fromB64(r.nameLocked)),
     publicKey: r.publicKey,
     hasAddKey: r.hasAddKey,
     me: members.find((m) => m.isMe) ?? { name: "?", invitedBy: null },
@@ -76,13 +80,13 @@ export async function load(): Promise<Box> {
     items: await Promise.all(
       r.items.map(async (i) => ({
         id: i.id,
-        label: i.labelLocked ? await unlockJson<Label>(o.identity, i.labelLocked) : null,
+        label: i.labelLocked ? await unlockJson<Label>(o.key, i.labelLocked) : null,
         size: i.size,
         createdAt: i.createdAt,
       })),
     ),
     invites: await Promise.all(
-      r.invites.map(async (i) => ({ ...(await unlockJson<Person>(o.identity, i.nameLocked)), id: i.id, expiresAt: i.expiresAt })),
+      r.invites.map(async (i) => ({ ...(await unlockJson<Person>(o.key, i.nameLocked)), id: i.id, expiresAt: i.expiresAt })),
     ),
   };
 }
@@ -96,7 +100,7 @@ export async function createBox(boxName: string): Promise<string> {
   const box = await keys.newKeyPair();
   const boxId = keys.randomId();
   const passkey = await createPasskey(boxId, boxName);
-  const access = await keys.accessKey(box.identity);
+  const held = await keys.holdBoxKey(box.identity);
   await api.post("/api/boxes", {
     id: boxId,
     publicKey: box.recipient,
@@ -106,8 +110,8 @@ export async function createBox(boxName: string): Promise<string> {
       envelope: keys.toB64(await keys.lockTo(passkey.key.recipient, box.identity)),
       nameLocked: await lockJson(box.recipient, { name: "", invitedBy: null } satisfies Person),
     },
-  }, access);
-  opened = { boxId, credentialId: passkey.credentialId, identity: box.identity, access };
+  }, held.access);
+  opened = { boxId, credentialId: passkey.credentialId, ...held };
   return boxId;
 }
 
@@ -115,8 +119,8 @@ export async function createBox(boxName: string): Promise<string> {
 export async function openWithPasskey(): Promise<string> {
   const passkey = await getPasskey();
   const { envelope } = await api.get<{ envelope: string }>(`/api/boxes/${passkey.boxId}/envelopes/${passkey.credentialId}`);
-  const identity = await keys.unlockText([passkey.key.identity], keys.fromB64(envelope));
-  opened = { boxId: passkey.boxId, credentialId: passkey.credentialId, identity, access: await keys.accessKey(identity) };
+  const held = await keys.holdBoxKey(await keys.unlockText([passkey.key.identity], keys.fromB64(envelope)));
+  opened = { boxId: passkey.boxId, credentialId: passkey.credentialId, ...held };
   return passkey.boxId;
 }
 
@@ -134,7 +138,7 @@ export async function addData(b: Box, name: string, type: string, data: Uint8Arr
 export async function openItem(itemId: string): Promise<Uint8Array> {
   const o = must();
   const file = await api.get<Uint8Array>(`/api/boxes/${o.boxId}/items/${itemId}`, o.access);
-  return keys.unlockBytes([o.identity], file);
+  return keys.unlockBytes([o.key], file);
 }
 
 export const deleteItem = (itemId: string) => api.del(`/api/boxes/${must().boxId}/items/${itemId}`, must().access);
@@ -156,15 +160,33 @@ export const deleteAddKey = () => api.del(`/api/boxes/${must().boxId}/add-key`, 
 type InviteContents = Person & { boxKey: string };
 
 /**
- * 0 prompts. Locks the box private key and the names to a new one-time key,
- * and puts that one-time key after the "#" of the link. Browsers never send
- * the "#" part to the server, so the server can't open the invite file.
+ * 1 prompt. An invite file holds the box private key, and the open box keeps
+ * that key in a form it can't copy out. So this person's passkey unlocks their
+ * envelope again, just for this invite. That also means a person who finds the
+ * box open on someone else's device can't make a link for themselves.
+ */
+async function boxKeyForInvite(o: Opened): Promise<string> {
+  const passkey = await getPasskey([o.credentialId]);
+  if (passkey.credentialId !== o.credentialId) throw Error("Use the passkey of this box.");
+  const { envelope } = await api.get<{ envelope: string }>(`/api/boxes/${o.boxId}/envelopes/${o.credentialId}`);
+  const boxKey = await keys.unlockText([passkey.key.identity], keys.fromB64(envelope));
+  checkPublicKey(await keys.publicKeyOf(boxKey), o.publicKey);
+  return boxKey;
+}
+
+/**
+ * 1 prompt (see boxKeyForInvite). Locks the box private key and the names to a
+ * new one-time key, and puts that one-time key after the "#" of the link.
+ * Browsers never send the "#" part to the server, so the server can't open the
+ * invite file.
  */
 export async function createInvite(b: Box, name: string, ttlHours: number): Promise<string> {
   const o = must();
+  const boxKey = await boxKeyForInvite(o);
+  if (opened !== o) throw Error("The box was locked. Open it and try again.");
   const oneTime = await keys.newKeyPair();
   const invitedBy = b.me.name;
-  const inviteFile = await keys.lockTo(oneTime.recipient, JSON.stringify({ boxKey: o.identity, name, invitedBy } satisfies InviteContents));
+  const inviteFile = await keys.lockTo(oneTime.recipient, JSON.stringify({ boxKey, name, invitedBy } satisfies InviteContents));
   const { id } = await api.post<{ id: string }>(`/api/boxes/${o.boxId}/invites`, {
     inviteFile: keys.toB64(inviteFile),
     nameLocked: await lockJson(b.publicKey, { name, invitedBy } satisfies Person),
@@ -173,35 +195,32 @@ export async function createInvite(b: Box, name: string, ttlHours: number): Prom
   return `${location.origin}/join/${id}#${oneTime.identity}`;
 }
 
-export type OpenedInvite = Person & { inviteId: string; boxId: string; boxName: string; boxKey: string; publicKey: string; access: string };
+/** `boxKey` is the box private key as a string: join() locks it to the new passkey. */
+export type OpenedInvite = Person & { inviteId: string; boxId: string; boxName: string; boxKey: string; held: keys.HeldBoxKey };
 
 /**
  * 0 prompts. Opening uses up the link: the server deletes the invite and
- * returns its file once. The still-locked file is kept in this tab's
- * sessionStorage, so a reload or a canceled passkey prompt can try again.
+ * returns its file once. The result lives only in this tab's memory: a reload
+ * or a closed tab loses it, and the person needs a new link. A canceled
+ * passkey prompt can try again.
  */
 export async function openInvite(inviteId: string, oneTimeIdentity: string): Promise<OpenedInvite> {
-  const stored = sessionStorage.getItem(`invite:${inviteId}`);
-  const claim: { boxId: string; inviteFile: string } = stored
-    ? JSON.parse(stored)
-    : await api.post(`/api/invites/${inviteId}/claim`, {});
-  sessionStorage.setItem(`invite:${inviteId}`, JSON.stringify(claim));
+  const claim = await api.post<{ boxId: string; inviteFile: string }>(`/api/invites/${inviteId}/claim`, {});
   let contents: InviteContents;
   try {
     contents = JSON.parse(await keys.unlockText([oneTimeIdentity], keys.fromB64(claim.inviteFile)));
   } catch {
     throw Error("This link can't be opened. Check that you have the full link, or ask for a new one.");
   }
-  const access = await keys.accessKey(contents.boxKey);
-  const r = await api.get<BoxResponse>(`/api/boxes/${claim.boxId}`, access);
-  await checkPublicKey(contents.boxKey, r.publicKey);
+  const held = await keys.holdBoxKey(contents.boxKey);
+  const r = await api.get<BoxResponse>(`/api/boxes/${claim.boxId}`, held.access);
+  checkPublicKey(held.publicKey, r.publicKey);
   return {
     inviteId,
     boxId: claim.boxId,
-    boxName: await keys.unlockText([contents.boxKey], keys.fromB64(r.nameLocked)),
+    boxName: await keys.unlockText([held.key], keys.fromB64(r.nameLocked)),
     boxKey: contents.boxKey,
-    publicKey: r.publicKey,
-    access,
+    held,
     name: contents.name,
     invitedBy: contents.invitedBy,
   };
@@ -213,9 +232,8 @@ export async function join(inv: OpenedInvite): Promise<string> {
   await api.post(`/api/boxes/${inv.boxId}/members`, {
     credentialId: passkey.credentialId,
     envelope: keys.toB64(await keys.lockTo(passkey.key.recipient, inv.boxKey)),
-    nameLocked: await lockJson(inv.publicKey, { name: inv.name, invitedBy: inv.invitedBy } satisfies Person),
-  }, inv.access);
-  sessionStorage.removeItem(`invite:${inv.inviteId}`);
-  opened = { boxId: inv.boxId, credentialId: passkey.credentialId, identity: inv.boxKey, access: inv.access };
+    nameLocked: await lockJson(inv.held.publicKey, { name: inv.name, invitedBy: inv.invitedBy } satisfies Person),
+  }, inv.held.access);
+  opened = { boxId: inv.boxId, credentialId: passkey.credentialId, ...inv.held };
   return inv.boxId;
 }

@@ -137,7 +137,7 @@ vlt.i7r.tech
 |---|---|
 | Phone or password manager | The passkey "Finance 2026". |
 | Server | The box ID, the box public key, the box name file, the access hash. One member row: the credential ID, the envelope, Tiger's name file. |
-| Browser tab memory | The box private key and the access key, until Tiger closes the tab or selects **Lock**. |
+| Browser tab memory | The box private key and the access key, until the box locks (see [Lock, reload and close](02-open-box.md#lock-reload-and-close)). Where the browser can, the box private key is a key object that scripts cannot read. |
 
 | Action | Face ID |
 |---|---|

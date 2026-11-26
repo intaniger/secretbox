@@ -21,14 +21,14 @@ Nok uses Face ID one time. Some devices ask two times.
 
 ## What happens, in plain words
 
-1. The page loads. The browser reads the one-time private key from the part after `#`. The server gets nothing yet.
+1. The page loads. The browser reads the one-time private key from the part after `#`, and at once removes that part from the address. The key is then only in tab memory. The server gets nothing yet.
 2. **Open invite** asks the server for the invite. The server deletes the row and gives the invite file, in one step. Nobody can get it again.
-3. The browser keeps the **locked** invite file in this tab, in case Nok reloads the page.
+3. The browser keeps the invite only in tab memory, not in storage. A reload or a closed tab loses it. Most desktop browsers ask first; phones often do not.
 4. The one-time private key unlocks the invite file. The browser gets the box private key and the two names.
 5. The browser calculates the access key. With it, the browser gets the box name and shows it.
 6. **Accept** makes Nok's passkey for this box. The passkey gives its PRF output: Nok's passkey key.
 7. The browser locks the box private key with Nok's passkey public key. This is her envelope. It also locks her name file.
-8. The browser sends the envelope and the name file. The server adds Nok as a member. The browser removes the `#` part from the address.
+8. The browser sends the envelope and the name file. The server adds Nok as a member. The browser forgets the invite and keeps the box key as it does after [Open a box](02-open-box.md#lock-reload-and-close).
 
 ## Who talks to whom
 
@@ -40,12 +40,12 @@ sequenceDiagram
   participant S as Server
   N->>B: Open the link
   B->>S: J1. GET /join/ID (the page only, no # part)
-  Note over B: Read the one-time private key from the # part
+  Note over B: Read the one-time private key from the # part. Remove the # part from the address
   N->>B: Open invite
   B->>S: J2. POST /api/invites/ID/claim
   Note over S: DELETE the row and return it, in one statement
   S-->>B: Box ID and invite file
-  Note over B: J3. Keep the locked file in the tab. J4. Unlock it. J5. Access key
+  Note over B: J3. Keep it in tab memory only. J4. Unlock it. J5. Access key
   B->>S: J6. GET /api/boxes/BOX_ID with the access key
   S-->>B: Box public key, box name file
   B->>N: You're invited to Finance 2026. You will appear as Nok
@@ -56,7 +56,7 @@ sequenceDiagram
   Note over B: J8. Passkey key. J9. Envelope and name file
   B->>S: J10. POST /api/boxes/BOX_ID/members with the access key
   S-->>B: OK
-  Note over B: Remove the # part from the address. The box is open
+  Note over B: Forget the invite. The box is open
 ```
 
 ## How the keys flow
@@ -81,16 +81,16 @@ flowchart TD
 
 | Step | Input | Method | Output | Goes to |
 |---|---|---|---|---|
-| J1. Open the page | The link. | The browser asks for the page `/join/crUC8B9PQQSYQ_-CBMvj7A`. It does not send the part after `#`. | The page. The one-time private key `AGE-SECRET-KEY-15ZZXCTU7YG…`, from the address. | J4 |
+| J1. Open the page | The link. | The browser asks for the page `/join/crUC8B9PQQSYQ_-CBMvj7A`. It does not send the part after `#`. The page reads that part, then removes it with `history.replaceState`. | The one-time private key `AGE-SECRET-KEY-15ZZXCTU7YG…`, in tab memory only. It is not in the address bar, in **Back**, or in a reopened tab. | J4 |
 | J2. Claim | The invite ID. | `POST /api/invites/:id/claim`. The server runs `DELETE … WHERE id = ? AND expires_at > now RETURNING …`. | Box ID `nbtYKFvPJE6MnspnIVuu4Q`. The invite file, 315 bytes. The row is gone. | J3, J4 |
-| J3. Keep the locked file | The box ID and the invite file (J2). | The browser puts them in `sessionStorage`. Only this tab can read it. | A reload or a canceled Face ID can try again, with no new claim. | J4 after a reload |
+| J3. Keep it in memory | The box ID and the invite file (J2). | A variable in the page. Nothing goes to `sessionStorage` or other storage: the address and the storage together would give the box private key to the next person at the device. | A canceled Face ID can try again. A reload cannot. | J4 |
 | J4. Unlock the invite file | The invite file (J2). The one-time private key (J1). | The age recipe backwards: X25519 with `oj15APQX12n1+USE…` gives the shared secret `369099b0e90abfc7…`. HKDF-SHA-256 gives the wrap key `a4b996d0…`. ChaCha20-Poly1305 unlocks the file key `a01d2d96…`. Then the payload. | Box private key `AGE-SECRET-KEY-1Z84DDGND8U…`. The name "Nok". The name of the person who invited: empty (Tiger, the box creator). | J5, J9 |
 | J5. Access key | The box private key (J4). | HMAC-SHA-256 with the text `secretbox access key v1`. | `-opAqacwlYsMBtzqm8OLNy6fM6xa3MBHIPav8AuUxBI`. The same value as Tiger's. | J6, J10 |
 | J6. Box name | The box ID. The access key (J5). | `GET /api/boxes/:id`. The browser checks the box public key against the box private key. Then it unlocks the box name file. | "Finance 2026". The box public key `age13aa297n0wgzsleu3…` | The screen, J9 |
 | J7. Make the passkey | The box ID as the user ID. The label "Finance 2026 – Nok". The PRF input `secretbox passkey key v1`. | WebAuthn `navigator.credentials.create` with the PRF extension. Nok confirms with Face ID. | Credential ID `AyIKBj8-mZ8hDc8Q1fb2PQ`. PRF output `eb73d4f6f9ae7b89…` | J8, J10 |
 | J8. Nok's passkey key | The PRF output (J7). | The 32 bytes are the X25519 private key. | Private key `AGE-SECRET-KEY-1ADEAFAHE4E…`. Public key `age1tezucs30m36lnwuc…` | J9 |
 | J9. Envelope and name file | The box private key (J4). Nok's passkey public key (J8). The text `{"name":"Nok","invitedBy":""}` and the box public key (J6). | The age recipe with an X25519 stanza, two times. Envelope: file key `062efaca…`, shared secret `53448d8b5f47980b…`. | Nok's envelope, 274 bytes. Nok's name file, 229 bytes. | J10 |
-| J10. Join | The credential ID (J7). The envelope and the name file (J9). The access key (J5). | `POST /api/boxes/:id/members` | The server adds the member row. The browser deletes the locked file from the tab and removes the `#` part from the address. | [Scenario 2](02-open-box.md) next time |
+| J10. Join | The credential ID (J7). The envelope and the name file (J9). The access key (J5). | `POST /api/boxes/:id/members` | The server adds the member row. The browser forgets the invite and the one-time private key. | [Scenario 2](02-open-box.md) next time |
 
 Nok's envelope, as the server keeps it:
 
@@ -113,9 +113,9 @@ Chat apps (LINE, Slack, iMessage) load a link to show a preview. They send `GET`
 | Nok stops… | What happens |
 |---|---|
 | Before **Open invite** | Nothing changed. The link still works. |
-| After **Open invite**, and she reloads the page | The tab still has the locked invite file. The page shows the invite again. |
 | After **Open invite**, and she cancels Face ID | She selects **Accept and save passkey** again. |
-| After **Open invite**, and she closes the tab | The claim used up the link. Nobody joined. A member must make a new link. |
+| After **Open invite**, and she reloads or closes the tab | Most desktop browsers ask first. Then the invite is gone: the claim used up the link, and the tab kept nothing. Nobody joined. A member must make a new link. |
+| After **Open invite**, and she waits 10 minutes | The page closes the invite, as above. |
 
 ## Result
 
@@ -123,7 +123,7 @@ Chat apps (LINE, Slack, iMessage) load a link to show a preview. They send `GET`
 |---|---|
 | Phone or password manager | The passkey "Finance 2026 – Nok". |
 | Server | A new member row: Nok's credential ID, her envelope, her name file. The invite row is gone. |
-| Browser tab memory | The box private key and the access key, until **Lock**, a reload or a closed tab. |
+| Browser tab memory | The box private key and the access key, until the box locks (see [Lock, reload and close](02-open-box.md#lock-reload-and-close)). |
 
 | Action | Face ID |
 |---|---|

@@ -105,7 +105,7 @@ Other websites cannot use a member's access:
 |---|---|
 | A user account for each person. | No accounts. |
 | One passkey for each person. The server checked it at sign-in (SimpleWebAuthn). | One passkey for each box membership. The server never checks it. |
-| A session cookie for 30 days. | The access key, in tab memory, until **Lock** or a closed tab. |
+| A session cookie for 30 days. | The access key, in tab memory, until the box locks: **Lock**, 5 minutes without use, a hidden tab, or a closed tab. |
 | A member key and a key copy for each box. | An envelope for each membership, with the box private key. |
 | Roles, then no roles. | No roles. |
 | Removal changed the box key. | Removal deletes the envelope. The box key stays. |

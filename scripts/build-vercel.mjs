@@ -62,7 +62,12 @@ writeFileSync(
         { src: "^/assets/(.*)$", headers: { "cache-control": "public, max-age=31536000, immutable" }, continue: true },
         {
           src: "^/(?!api/|assets/).*$",
-          headers: { "content-security-policy": csp, "referrer-policy": "no-referrer", "x-content-type-options": "nosniff" },
+          headers: {
+            "content-security-policy": csp,
+            "referrer-policy": "no-referrer",
+            "x-content-type-options": "nosniff",
+            "cache-control": "no-store",
+          },
           continue: true,
         },
         { src: "^/api/(.*)$", dest: "/api?__path=$1" },

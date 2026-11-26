@@ -29,10 +29,10 @@ This document lists each known flaw. Each flaw has a level:
 | 7 | X25519 is not safe against future quantum computers | Medium | A fix is possible. |
 | 8 | Sizes, times and counts are not locked | Low | Design limit |
 | 9 | The passkey label shows the box name and an invited person's name | Low | Design choice |
-| 10 | An opened invite is lost if the tab closes | Low | Design limit |
+| 10 | An opened invite is lost on a reload or a closed tab | Low | Design choice |
 | 11 | A lost passkey means lost access | Low | A member can send a new link. |
 | 12 | No rate limits, no audit log | Low | Not built yet |
-| 13 | Unlocked data stays in the browser tab | Low | A fix is possible. |
+| 13 | An open box can be used by code in the tab | Low | Limited: auto-lock, key object, Face ID for links |
 | 14 | Passkey PRF support is not the same everywhere | Low | Design limit |
 
 ## 1. The server sends the code that holds the keys
@@ -165,9 +165,11 @@ This is a deliberate choice. Encryption cannot make a member "read only": each m
 
 **Fix:** Use a neutral label. But then the passkey list is harder to use.
 
-## 10. An opened invite is lost if the tab closes
+## 10. An opened invite is lost on a reload or a closed tab
 
-**What:** **Open invite** uses up the link. The tab keeps the locked invite file, so a reload or a canceled Face ID can try again. If the person closes the tab before **Accept**, the link is gone.
+**What:** **Open invite** uses up the link. The tab keeps the invite only in memory, so a canceled Face ID can try again. A reload, a closed tab, or 10 minutes without **Accept** loses it. Most desktop browsers ask before a reload or a close; phones often do not.
+
+**Why:** The one-time key and the invite file together give the box private key. If the tab kept them in storage, the next person at the device could get them back, for example by reopening the closed tab.
 
 **Effect:** Nobody joined. A member must send a new link.
 
@@ -188,13 +190,19 @@ This is a deliberate choice. Encryption cannot make a member "read only": each m
 
 **Fix:** Add rate limits before real use.
 
-## 13. Unlocked data stays in the browser tab
+## 13. An open box can be used by code in the tab
 
-**What:** The box private key and the access key stay in tab memory until the tab closes or the person selects **Lock**. The download link for an item stays in memory until the tab closes. During a join, the tab also keeps the locked invite file, and the address bar holds the one-time key.
+**What:** While a box is open, the tab can unlock its files. Vault Box keeps this time short, and makes the key hard to take:
 
-**Who can use it:** A person who uses the same unlocked device. A browser extension with access to the page.
+- The box locks after 5 minutes without use, after 2 minutes hidden (another tab, a minimized window, another app on a phone), and when the page goes away. Lock removes the box private key, the access key, the screen, the last message and the download links. The **Lock** button also clears text that Vault Box copied; an automatic lock tries, but browsers often block it.
+- Where the browser has X25519 in WebCrypto (recent browsers), the box private key is a key object that cannot be exported. A script can use it while the box is open, but cannot copy it to keep the box after it locks. Other browsers keep the key as text.
+- Each invite link needs Face ID, because a link gives the box private key.
+- The join page removes the one-time key from the address bar at once. It keeps an opened invite only in memory (flaw 10).
+- Fields for secrets turn off cloud spellcheck, grammar add-ons and autocorrect. The page turns off browser translation, which sends the page text to a cloud service.
 
-**Fix:** Lock automatically after some minutes without use. Free the download link after use.
+**Who can use it:** A person who uses the same unlocked device before the box locks. A browser extension with access to the page, while the box is open. Code that runs in the page before the box opens (flaw 1, or an extension) can still watch the passkey and get the key.
+
+**Limits:** The access key is still text (flaw 5). Clipboard history apps keep their own copy of copied text. The web cannot stop screenshots or screen sharing, so an open item or a new link on the screen can be seen.
 
 ## 14. Passkey PRF support is not the same everywhere
 
@@ -207,7 +215,12 @@ This is a deliberate choice. Encryption cannot make a member "read only": each m
 | Flaw in the first version | What changed |
 |---|---|
 | Expired invites kept the invite file. | The server deletes the row when a person uses the link, when a member cancels it, and after the time limit. |
-| A stopped join could not continue. | The tab keeps the locked invite file. A reload or a canceled Face ID can try again. |
+| A stopped join could not continue. | A canceled Face ID can try again. A reload cannot: see flaw 10. |
+| The tab never locked itself, and kept the box private key as text. | The box locks by itself. Where the browser allows it, the key is a key object that scripts cannot export. See flaw 13. |
+| **Share** gave out the box private key with no Face ID. | Each invite link needs Face ID. |
+| The join tab kept the one-time key in the address and the invite file in `sessionStorage`. Together they gave the box private key. | The page removes the key from the address at once, and keeps the invite in memory only. |
+| **Lock** left the last message, the download links and copied text. | **Lock** removes them. |
+| Cloud spellcheck, grammar add-ons and page translation could get typed or unlocked text. | The fields and the page turn them off. |
 | Names, box names and item names were not locked. | They are in name files and labels now. The join page shows nothing before **Open invite**. |
 | The server could give a wrong public key. | The browser checks the box public key against the box private key. The server cannot make a false envelope, because it never gets a passkey public key. |
 | A stolen member key also opened future key copies. | There are no member keys and no key copies. |
@@ -225,6 +238,7 @@ This is a deliberate choice. Encryption cannot make a member "read only": each m
 | Another website sends requests as the user | Yes. There are no cookies. Each request needs the access key, and other websites cannot read it. |
 | A person controls the server code | **No.** See flaw 1. |
 | A removed member who kept the box private key | **No.** See flaw 2. |
+| A person who finds an open box on an unlocked device | Partly. The box locks by itself after a few minutes, and a new link needs Face ID. See flaw 13. |
 
 ## Technical details
 
