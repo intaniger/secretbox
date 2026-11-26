@@ -9,22 +9,6 @@ import { migrate } from "./db.ts";
 import { pgDb } from "./db-pg.ts";
 
 /**
- * Each address people use is its own passkey domain: the production domain,
- * custom domains from ORIGINS, and (for testing) the preview URLs.
- */
-function origins(): string[] {
-  const list = (process.env.ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  for (const host of [
-    process.env.VERCEL_PROJECT_PRODUCTION_URL,
-    process.env.VERCEL_BRANCH_URL,
-    process.env.VERCEL_URL,
-  ]) {
-    if (host) list.push(`https://${host}`);
-  }
-  return list;
-}
-
-/**
  * The pooled Postgres URL. Vercel's Neon integration names it DATABASE_URL,
  * or <PREFIX>_DATABASE_URL when a custom prefix was chosen (this project: DB_).
  */
@@ -46,7 +30,7 @@ function getApp(): Promise<Hono> {
     if (!url) throw Error("No database URL. Connect a Postgres database (e.g. Neon) to the Vercel project.");
     const db = pgDb(url);
     await migrate(db);
-    return createApp(db, { origins });
+    return createApp(db);
   })().catch((err) => {
     appReady = undefined; // retry on the next request
     throw err;

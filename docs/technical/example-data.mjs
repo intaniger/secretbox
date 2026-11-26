@@ -1,9 +1,10 @@
 // Generates the example values used throughout docs/.
 //
 // It builds every age file BY HAND, step by step, following the age spec
-// (https://age-encryption.org/v1) and Typage's fido2prf format, so each
-// intermediate value (shared secret, wrap key, header MAC, payload key…) can
-// be shown. Then it checks every file opens with the real Typage library.
+// (https://age-encryption.org/v1), so each intermediate value (shared secret,
+// wrap key, header MAC, payload key…) can be shown. Then it checks every file
+// opens with the real Typage library, and that the app's own key code
+// (web/src/keys.ts) gives the same passkey key and access key.
 // If the docs described the algorithm wrongly, this script would fail.
 //
 // The passkey is simulated (a real one never reveals its secret), using the
@@ -12,15 +13,16 @@
 //   node docs/technical/example-data.mjs   → writes docs/technical/example-data.json
 
 import { writeFileSync } from "node:fs";
-import { createHash, randomBytes as nodeRandom } from "node:crypto";
+import { createHash } from "node:crypto";
 import * as age from "age-encryption";
 import { x25519 } from "@noble/curves/ed25519.js";
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
-import { extract, hkdf } from "@noble/hashes/hkdf.js";
+import { hkdf } from "@noble/hashes/hkdf.js";
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { randomBytes } from "@noble/hashes/utils.js";
 import { base64nopad, bech32 } from "@scure/base";
+import * as appKeys from "../../web/src/keys.ts";
 
 const utf8 = (s) => new TextEncoder().encode(s);
 const hex = (u) => Buffer.from(u).toString("hex");
@@ -34,9 +36,11 @@ const concat = (...parts) => {
   return out;
 };
 const bech32Bytes = (s) => bech32.fromWords(bech32.decode(s.toLowerCase(), false).words);
+const sha256hex = (s) => createHash("sha256").update(s).digest("hex");
 
 const ZERO_NONCE = new Uint8Array(12);
-const PRF_LABEL = "age-encryption.org/fido2prf";
+const PRF_INPUT = "secretbox passkey key v1";
+const ACCESS_LABEL = "secretbox access key v1";
 
 // --- Keys ----------------------------------------------------------------------
 
@@ -46,16 +50,24 @@ async function keyPair() {
   return { identity, recipient, privateHex: hex(bech32Bytes(identity)), publicHex: hex(bech32Bytes(recipient)) };
 }
 
-/** A simulated passkey: a credential ID and the hidden PRF secret (CTAP2 "CredRandom"). */
-function passkey() {
-  return { credentialId: b64url(randomBytes(16)), hiddenSecret: randomBytes(32) };
+/** A simulated passkey for one box: its user ID is the box ID. */
+function passkey(boxId, label) {
+  return { credentialId: b64url(randomBytes(16)), userId: boxId, label, hiddenSecret: randomBytes(32) };
 }
 
-/** What the browser + authenticator compute for one PRF input. */
-function prf(pk, input) {
-  const salt = sha256(concat(utf8("WebAuthn PRF"), [0x00], input)); // browser
-  const output = hmac(sha256, pk.hiddenSecret, salt); //                  authenticator (hmac-secret)
-  return { salt, output };
+/** The passkey key: the PRF output for the fixed input, used as an X25519 private key. */
+function passkeyKey(pk) {
+  const browserSalt = sha256(concat(utf8("WebAuthn PRF"), [0x00], utf8(PRF_INPUT))); // browser
+  const prfOutput = hmac(sha256, pk.hiddenSecret, browserSalt); //                       authenticator (hmac-secret)
+  const identity = bech32.encode("AGE-SECRET-KEY-", bech32.toWords(prfOutput), false).toUpperCase();
+  const recipient = bech32.encode("age", bech32.toWords(x25519.getPublicKey(prfOutput)), false);
+  return { prfInput: PRF_INPUT, browserSaltHex: hex(browserSalt), prfOutputHex: hex(prfOutput), identity, recipient };
+}
+
+/** The access key: HMAC-SHA-256(box private key bytes, label). The server keeps SHA-256 of its text. */
+function accessKey(box) {
+  const key = b64url(hmac(sha256, bech32Bytes(box.identity), utf8(ACCESS_LABEL)));
+  return { label: ACCESS_LABEL, key, storedHash: sha256hex(key) };
 }
 
 // --- Stanzas (how the file key is locked) -----------------------------------------------
@@ -76,30 +88,6 @@ function x25519Stanza(recipient, fileKey) {
       ephemeralShareB64: b64(ephemeralShare),
       sharedSecretHex: hex(sharedSecret),
       hkdfSaltHex: hex(salt),
-      wrapKeyHex: hex(wrapKey),
-      bodyB64: b64(body),
-    },
-  };
-}
-
-function prfStanza(pk, fileKey) {
-  const nonce = randomBytes(16);
-  const input1 = concat(utf8(PRF_LABEL), [0x01], nonce);
-  const input2 = concat(utf8(PRF_LABEL), [0x02], nonce);
-  const r1 = prf(pk, input1);
-  const r2 = prf(pk, input2);
-  const wrapKey = extract(sha256, concat(r1.output, r2.output), utf8(PRF_LABEL));
-  const body = chacha20poly1305(wrapKey, ZERO_NONCE).encrypt(fileKey);
-  return {
-    lines: [`-> ${PRF_LABEL} ${b64(nonce)}`, b64(body)],
-    steps: {
-      nonceB64: b64(nonce),
-      input1Hex: hex(input1),
-      input2Hex: hex(input2),
-      browserSalt1Hex: hex(r1.salt),
-      browserSalt2Hex: hex(r2.salt),
-      prfOutput1Hex: hex(r1.output),
-      prfOutput2Hex: hex(r2.output),
       wrapKeyHex: hex(wrapKey),
       bodyB64: b64(body),
     },
@@ -142,11 +130,6 @@ const lockTo = (recipient, text) => {
   const fileKey = randomBytes(16);
   return ageFile(x25519Stanza(recipient, fileKey), fileKey, utf8(text));
 };
-const lockToPasskey = (pk, text) => {
-  const fileKey = randomBytes(16);
-  return ageFile(prfStanza(pk, fileKey), fileKey, utf8(text));
-};
-
 // --- Verify with the real library -----------------------------------------------------------
 
 async function openWith(identity, file) {
@@ -154,75 +137,73 @@ async function openWith(identity, file) {
   d.addIdentity(identity);
   return d.decrypt(file, "text");
 }
-async function openWithPasskey(pk, file) {
-  const { Stanza } = await import("age-encryption/dist/format.js").catch(() => ({}));
-  void Stanza;
-  const d = new age.Decrypter();
-  d.addIdentity({
-    async unwrapFileKey(stanzas) {
-      for (const s of stanzas) {
-        if (s.args[0] !== PRF_LABEL) continue;
-        const nonce = base64nopad.decode(s.args[1]);
-        const o1 = prf(pk, concat(utf8(PRF_LABEL), [1], nonce)).output;
-        const o2 = prf(pk, concat(utf8(PRF_LABEL), [2], nonce)).output;
-        const key = extract(sha256, concat(o1, o2), utf8(PRF_LABEL));
-        try {
-          return chacha20poly1305(key, ZERO_NONCE).decrypt(s.body);
-        } catch {
-          return null;
-        }
-      }
-      return null;
-    },
-  });
-  return d.decrypt(file, "text");
-}
-
 // --- The story -----------------------------------------------------------------------------------
 
-const sha256hex = (s) => createHash("sha256").update(s).digest("hex");
+const json = (v) => JSON.stringify(v);
+const now = Date.parse("2026-11-26T09:00:00Z");
 
-// 01: Tiger signs up and creates "Finance 2026"
-const tigerPasskey = passkey();
-const tigerMember = await keyPair();
-const tigerEnvelope = lockToPasskey(tigerPasskey, tigerMember.identity);
+// 01: Tiger makes "Finance 2026". The box ID is the passkey's user ID.
+const financeId = b64url(randomBytes(16));
 const financeBox = await keyPair();
-const tigerFinanceCopy = lockTo(tigerMember.recipient, financeBox.identity);
-const sessionToken = b64url(nodeRandom(32));
+const tigerPasskey = passkey(financeId, "Finance 2026 – Tiger");
+const tigerKey = passkeyKey(tigerPasskey);
+const tigerEnvelope = lockTo(tigerKey.recipient, financeBox.identity);
+const financeAccess = accessKey(financeBox);
+const financeName = lockTo(financeBox.recipient, "Finance 2026");
+const tigerName = lockTo(financeBox.recipient, json({ name: "Tiger", invitedBy: null }));
 
-// 02: Tiger (already signed in) creates "HR 2027"
+// 02: Tiger makes "HR 2027" too: a second passkey, with a different key.
+const hrId = b64url(randomBytes(16));
 const hrBox = await keyPair();
-const tigerHrCopy = lockTo(tigerMember.recipient, hrBox.identity);
+const tigerHrPasskey = passkey(hrId, "HR 2027 – Tiger");
+const tigerHrKey = passkeyKey(tigerHrPasskey);
+const tigerHrEnvelope = lockTo(tigerHrKey.recipient, hrBox.identity);
+const hrAccess = accessKey(hrBox);
 
-// 03: Tiger adds a note to Finance 2026
+// 03: Tiger adds a note: a locked label and the locked data.
 const noteText = "Salary sheet: Nok 50k";
+const labelText = json({ name: "note.txt", type: "text/plain", size: utf8(noteText).length, addedBy: "Tiger" });
+const noteLabel = lockTo(financeBox.recipient, labelText);
 const note = lockTo(financeBox.recipient, noteText);
+const addKey = `sbx_${b64url(randomBytes(24))}`;
 
-// 04: Tiger creates an invite for Nok
+// 04: Tiger makes an invite for Nok.
 const oneTime = await keyPair();
 const inviteId = b64url(randomBytes(16));
-const inviteFile = lockTo(oneTime.recipient, financeBox.identity);
+const inviteText = json({ boxKey: financeBox.identity, name: "Nok", invitedBy: "Tiger" });
+const inviteFile = lockTo(oneTime.recipient, inviteText);
+const inviteName = lockTo(financeBox.recipient, json({ name: "Nok", invitedBy: "Tiger" }));
 
-// 05: Nok uses the invite
-const nokPasskey = passkey();
-const nokMember = await keyPair();
-const nokEnvelope = lockToPasskey(nokPasskey, nokMember.identity);
-const boxFromInvite = await openWith(oneTime.identity, inviteFile.file);
-const nokFinanceCopy = lockTo(nokMember.recipient, boxFromInvite);
+// 05: Nok opens the invite and joins with her own passkey for this box.
+const opened = JSON.parse(await openWith(oneTime.identity, inviteFile.file));
+const nokAccess = accessKey({ identity: opened.boxKey });
+const nokPasskey = passkey(financeId, "Finance 2026 – Nok");
+const nokKey = passkeyKey(nokPasskey);
+const nokEnvelope = lockTo(nokKey.recipient, opened.boxKey);
+const nokName = lockTo(financeBox.recipient, json({ name: "Nok", invitedBy: "Tiger" }));
 
-// Check every file with Typage, and the full reading chain.
+// Check every file with Typage, the app's own key code, and the full reading chain.
+const appKeyOf = async (k) => (await appKeys.keyPairFromSecret(Buffer.from(k.prfOutputHex, "hex"))).recipient;
 const checks = {
-  tigerEnvelope: (await openWithPasskey(tigerPasskey, tigerEnvelope.file)) === tigerMember.identity,
-  tigerFinanceCopy: (await openWith(tigerMember.identity, tigerFinanceCopy.file)) === financeBox.identity,
-  tigerHrCopy: (await openWith(tigerMember.identity, tigerHrCopy.file)) === hrBox.identity,
+  tigerKeyMatchesApp: (await appKeyOf(tigerKey)) === tigerKey.recipient,
+  nokKeyMatchesApp: (await appKeyOf(nokKey)) === nokKey.recipient,
+  tigerKeyMatchesTypage: (await age.identityToRecipient(tigerKey.identity)) === tigerKey.recipient,
+  accessKeyMatchesApp: (await appKeys.accessKey(financeBox.identity)) === financeAccess.key,
+  tigerEnvelope: (await openWith(tigerKey.identity, tigerEnvelope.file)) === financeBox.identity,
+  tigerHrEnvelope: (await openWith(tigerHrKey.identity, tigerHrEnvelope.file)) === hrBox.identity,
+  financeName: (await openWith(financeBox.identity, financeName.file)) === "Finance 2026",
+  tigerName: JSON.parse(await openWith(financeBox.identity, tigerName.file)).name === "Tiger",
+  noteLabel: (await openWith(financeBox.identity, noteLabel.file)) === labelText,
   note: (await openWith(financeBox.identity, note.file)) === noteText,
-  inviteFile: boxFromInvite === financeBox.identity,
-  nokEnvelope: (await openWithPasskey(nokPasskey, nokEnvelope.file)) === nokMember.identity,
+  inviteFile: opened.boxKey === financeBox.identity && opened.name === "Nok",
+  inviteName: JSON.parse(await openWith(financeBox.identity, inviteName.file)).invitedBy === "Tiger",
+  nokAccessSameAsTiger: nokAccess.key === financeAccess.key,
+  nokEnvelope: (await openWith(nokKey.identity, nokEnvelope.file)) === financeBox.identity,
   nokReadsNote: await (async () => {
-    const member = await openWithPasskey(nokPasskey, nokEnvelope.file);
-    const box = await openWith(member, nokFinanceCopy.file);
+    const box = await openWith(nokKey.identity, nokEnvelope.file);
     return (await openWith(box, note.file)) === noteText;
   })(),
+  tigerKeyCantOpenNokEnvelope: await openWith(tigerKey.identity, nokEnvelope.file).then(() => false, () => true),
 };
 if (!Object.values(checks).every(Boolean)) {
   console.error("Verification FAILED", checks);
@@ -232,26 +213,39 @@ if (!Object.values(checks).every(Boolean)) {
 const data = {
   note: "Generated by docs/technical/example-data.mjs. Every file was built by hand and verified with Typage. The passkeys are simulated.",
   checks,
-  tiger: {
-    passkey: { credentialId: tigerPasskey.credentialId, hiddenSecretHex: hex(tigerPasskey.hiddenSecret) },
-    member: tigerMember,
-    envelope: tigerEnvelope.out,
-    session: { cookieToken: sessionToken, storedHash: sha256hex(sessionToken) },
+  financeBox: {
+    id: financeId, name: "Finance 2026", ...financeBox,
+    access: financeAccess, nameLocked: financeName.out,
   },
-  financeBox: { name: "Finance 2026", ...financeBox, tigerKeyCopy: tigerFinanceCopy.out },
-  hrBox: { name: "HR 2027", ...hrBox, tigerKeyCopy: tigerHrCopy.out },
-  item: { name: "note.txt", text: noteText, ...note.out },
+  tiger: {
+    passkey: { credentialId: tigerPasskey.credentialId, userId: tigerPasskey.userId, label: tigerPasskey.label, hiddenSecretHex: hex(tigerPasskey.hiddenSecret) },
+    passkeyKey: tigerKey,
+    envelope: tigerEnvelope.out,
+    nameText: json({ name: "Tiger", invitedBy: null }),
+    nameLocked: tigerName.out,
+  },
+  hrBox: {
+    id: hrId, name: "HR 2027", ...hrBox, access: hrAccess,
+    tigerPasskey: { credentialId: tigerHrPasskey.credentialId, userId: tigerHrPasskey.userId, label: tigerHrPasskey.label, hiddenSecretHex: hex(tigerHrPasskey.hiddenSecret) },
+    tigerPasskeyKey: tigerHrKey,
+    tigerEnvelope: tigerHrEnvelope.out,
+  },
+  item: { text: noteText, labelText, label: noteLabel.out, data: note.out },
+  addKey: { key: addKey, storedHash: sha256hex(addKey) },
   invite: {
     id: inviteId,
     oneTime,
     link: `https://secretbox-nu.vercel.app/join/${inviteId}#${oneTime.identity}`,
+    contents: inviteText,
     file: inviteFile.out,
+    nameLocked: inviteName.out,
+    expiresAt: now + 24 * 3600 * 1000,
   },
   nok: {
-    passkey: { credentialId: nokPasskey.credentialId, hiddenSecretHex: hex(nokPasskey.hiddenSecret) },
-    member: nokMember,
+    passkey: { credentialId: nokPasskey.credentialId, userId: nokPasskey.userId, label: nokPasskey.label, hiddenSecretHex: hex(nokPasskey.hiddenSecret) },
+    passkeyKey: nokKey,
     envelope: nokEnvelope.out,
-    financeKeyCopy: nokFinanceCopy.out,
+    nameLocked: nokName.out,
   },
 };
 

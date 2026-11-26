@@ -4,14 +4,16 @@
 
 ## In short
 
-Secretbox protects data against people who **keep** the data: the database, its backups, and the hosting companies. They get only locked files.
+Secretbox protects data against people who **keep** the data: the database, its backups, and the hosting companies. They get only locked files and hashes.
 
 Secretbox does **not** fully protect data against people who **control the server code**. The server sends the page that unlocks the data. A changed page can steal keys.
+
+Secretbox has no accounts. A person is a member because they have the box private key. This makes the system simple, but it also means that **nobody can take the box private key back** from a person who had it.
 
 This document lists each known flaw. Each flaw has a level:
 
 - **High:** a person can read the data of a box.
-- **Medium:** a person can read some data or information, but only with special access or special luck.
+- **Medium:** a person can read some data or information, or damage data, but only with special access or special luck.
 - **Low:** a problem with use, or a small risk.
 
 ## Summary
@@ -19,20 +21,19 @@ This document lists each known flaw. Each flaw has a level:
 | # | Flaw | Level | Status |
 |---|---|---|---|
 | 1 | The server sends the code that holds the keys | High | Design limit |
-| 2 | The server can give a wrong public key | High | Design limit. A fix is possible. |
-| 3 | Expired invites keep the invite file | Medium | Bug. Easy to fix. |
+| 2 | Removal deletes only the envelope | High | Design choice |
+| 3 | An invite link is a secret until somebody uses it | Medium | Design limit |
 | 4 | Deleted invite files stay in backups | Medium | Design limit |
-| 5 | A removed member keeps what they read | Medium | Design limit |
-| 6 | A stolen member private key also opens future key copies | Medium | A fix is possible. |
-| 7 | Names, sizes, dates and members are not locked | Medium | Design limit |
-| 8 | An invite link is a secret until somebody uses it | Medium | Design limit |
-| 9 | X25519 is not safe against future quantum computers | Medium | A fix is possible. |
-| 10 | A person cannot finish a stopped join through the page | Low | Bug. Easy to fix. |
-| 11 | A lost passkey means lost access | Low | A fix is possible. |
-| 12 | No rate limits, no audit log, no way to cancel tokens | Low | Not built yet |
+| 5 | The access key works like a password for the box | Medium | Design choice |
+| 6 | Every member can do everything | Medium | Design choice |
+| 7 | X25519 is not safe against future quantum computers | Medium | A fix is possible. |
+| 8 | Sizes, times and counts are not locked | Low | Design limit |
+| 9 | The passkey label shows the box name and the person's name | Low | Design choice |
+| 10 | An opened invite is lost if the tab closes | Low | Design limit |
+| 11 | A lost passkey means lost access | Low | A member can send a new link. |
+| 12 | No rate limits, no audit log | Low | Not built yet |
 | 13 | Unlocked data stays in the browser tab | Low | A fix is possible. |
 | 14 | Passkey PRF support is not the same everywhere | Low | Design limit |
-| 15 | Every member can do everything | Medium | Design choice |
 
 ## 1. The server sends the code that holds the keys
 
@@ -43,15 +44,15 @@ This document lists each known flaw. Each flaw has a level:
 - A person who controls the Vercel account.
 - Vercel.
 - A person who can push to the `main` branch. Each push deploys automatically.
-- A person who changes a library that the app uses (for example Typage or SimpleWebAuthn), before the build.
+- A person who changes a library that the app uses (for example Typage), before the build.
 
-**Effect:** The changed page waits for the next Face ID. Then it sends the member private key, the box private keys or the data to the attacker. The user sees nothing unusual. After one member of a box unlocks, the attacker can read all items of that box.
+**Effect:** The changed page waits for the next Face ID. Then it sends the box private key or the data to the attacker. The user sees nothing unusual. After one member of a box opens it, the attacker can read all items of that box, now and later.
 
 ```mermaid
 flowchart LR
   A["Attacker changes<br/>the server code"] --> P["Changed page"]
-  P --> U["User unlocks<br/>with Face ID"]
-  U --> K["Page sends the keys<br/>to the attacker"]
+  P --> U["Member opens the box<br/>with Face ID"]
+  U --> K["Page sends the box<br/>private key to the attacker"]
   K --> D["Attacker unlocks<br/>all items of the box"]
 ```
 
@@ -62,123 +63,134 @@ flowchart LR
 - Serve the page from a separate place that does not change often. Publish the hash of each build, so people can verify it.
 - For the highest protection, make a native app. Code changes then go through app releases.
 
-## 2. The server can give a wrong public key
+## 2. Removal deletes only the envelope
 
-**What:** The browser locks keys with public keys that it gets from the server. The browser does not verify that a public key really belongs to that person. Examples:
+**What:** When a member removes a person, the server deletes that person's envelope. Their passkey then opens nothing. But the box key does not change. If the person kept a copy of the box private key, they keep everything:
 
-- When a member removes another member, the browser locks the new box private key to each member public key in the list. The server can add an extra "member" with the attacker's public key.
-- When a person makes a box, the browser locks the box private key to the member public key from `/api/me`.
-- Members and other systems lock items to the box public key from the server.
+- They can calculate the access key. The server then answers them like any member.
+- They can read all items, also new items.
+- They can make invite links.
 
-**Who can use it:** A person who controls the server or the database.
+**Who can use it:** A removed member who copied the box private key from the browser. A normal person does not do this. A person who plans it can.
 
-**Effect:** The attacker gets a copy of a box private key. Or members and other systems lock new items to the attacker's key.
+**Effect:** Removal stops a lost or stolen phone. It does not stop a person who wants to keep access.
 
-**Fix:** Show a short **key fingerprint** for each member key. People compare the fingerprints face to face or by phone. The browser can also remember fingerprints and show a warning if one changes.
+**Why:** A real removal needs a new box key, and a new envelope for each member who stays. The browser cannot make an envelope for another person, because it does not know their passkey public key. Each member would have to join again.
 
-## 3. Expired invites keep the invite file
+**How to decrease the risk:**
 
-**What:** The server deletes the invite file when a person completes an invite or a member cancels it. It does **not** delete it when an invite expires.
+- To cut a person off fully, make a new box. Move the data into it. Invite the people who must stay.
+- Give access only to people you trust with the whole box, for as long as the box exists.
 
-**Who can use it:** A person who has the link **and** a copy of the database.
+## 3. An invite link is a secret until somebody uses it
 
-**Effect:** That person can unlock the invite file and get the box private key of that time. See [scenario 6](06-invite-expired-or-reused.md#what-stays-in-the-database).
-
-**Fix:** Delete the invite file of each expired invite. Do it at each claim attempt, and with a regular cleanup task.
-
-## 4. Deleted invite files stay in backups
-
-**What:** "Deleted" means that the server changes the database row. Neon keeps a restore history, and backups can keep old rows.
-
-**Who can use it:** A person who has the link (for example from an old chat) **and** a database backup.
-
-**Effect:** The same as flaw 3.
-
-**How to decrease the risk:** Use short invite time limits. Keep the backup history short. Change the box key after a link leaks.
-
-## 5. A removed member keeps what they read
-
-**What:** Removal stops new access. It cannot remove what a person already saw.
-
-**Who can use it:** A member, before or after removal.
-
-**Effect:**
-
-- A member can copy each item that they can read. No encryption can stop this.
-- A removed member can keep the old box private key. With a database copy, they can unlock the items from before the key change.
-
-**How to decrease the risk:** Give access only to people who must have it. Remove members who do not need access any more.
-
-## 6. A stolen member private key also opens future key copies
-
-**What:** Members lock new box private keys to member public keys, for example after a key change or for a new box. If a person steals a member private key, they can also unlock these future key copies.
-
-**Who can use it:** A person who stole a member private key, for example through flaw 1 or malware on the device.
-
-**Effect:** Access continues after a box key change. It stops only when that person's member key changes.
-
-**Fix:** Add a **Change my key** action. It makes a new member key pair, a new envelope and new key copies.
-
-## 7. Names, sizes, dates and members are not locked
-
-**What:** These are not locked: names, box names, item names, item sizes, dates, who is in which box, who invited whom.
-
-Also, `GET /api/invites/:id` needs no sign-in. A person with the invite ID sees the box name, the inviter's name and the name of the invited person.
-
-**Who can use it:** A person with database access. For the invite information: a person with the link.
-
-**Fix:** Lock item names inside the item. Show less information on the invite page.
-
-## 8. An invite link is a secret until somebody uses it
-
-**What:** The first person who uses the link joins the box. The server cannot know if that person is the correct person.
+**What:** The first person who opens the link gets the box private key. The server cannot know if that person is the correct person. That person then joins with the name that the inviter typed.
 
 **Who can use it:** A person who sees the link before the correct person uses it. For example, a person in a group chat.
 
-**Effect:** That person becomes a member. The correct person sees "already used".
+**Effect:** That person reads the box. The member list shows them with the correct person's name. The correct person sees "already used". Because of flaw 2, removal does not stop them.
 
-**How to decrease the risk:** Send links in private chats only. Use short time limits. Look at **used by** in the invite list. Remove the wrong person, which changes the box key.
+**How to decrease the risk:** Send links in private chats only. Use short time limits. Ask each person to confirm that they joined. If a person sees "already used" but did not use the link, make a new box. See [scenario 6](06-invite-expired-or-reused.md#another-person-uses-the-link-first).
 
-## 9. X25519 is not safe against future quantum computers
+## 4. Deleted invite files stay in backups
 
-**What:** A large quantum computer could break X25519 in the future. The key copies, items and invite files use X25519.
+**What:** "Deleted" means that the row is gone from the live database. Neon keeps a restore history, and backups can keep old rows. An expired row also stays until somebody makes or opens an invite.
+
+**Who can use it:** A person who has the link, for example from an old chat. That person also needs a database backup from before somebody used the link.
+
+**Effect:** That person can unlock the invite file and get the box private key.
+
+**How to decrease the risk:** Use short invite time limits. Keep the backup history short. Run a regular cleanup that deletes expired invites.
+
+## 5. The access key works like a password for the box
+
+**What:** The browser sends the access key with each request for a box. The server keeps only its hash, but it sees the key in each request.
+
+**Who can use it:** A person who controls the server and records the keys. A browser extension that reads the page's requests.
+
+**Effect:** With the access key, a person can do on the server what a member can do. They can get the locked files, add or delete items, remove members, and make or cancel invites. The access key **cannot unlock** anything. So this person can damage data, but cannot read it.
+
+**How to decrease the risk:** Keep backups of the database. A later version can use a signature for each request, so the server never sees a reusable key.
+
+## 6. Every member can do everything
+
+**What:** There are no roles. Each member can:
+
+- invite any person, and those people can invite more people,
+- remove any other member, also the person who made the box,
+- delete items,
+- make or turn off the add key.
+
+The server stops only one thing: it does not remove the last member of a box.
+
+**Who can use it:** Any member, for example a careless member or a member whose phone is stolen.
+
+**Effect:** Access can spread further than the first person wanted. One member can remove others or delete data.
+
+This is a deliberate choice. Encryption cannot make a member "read only": each member has the box private key and can copy each item.
+
+**How to decrease the risk:**
+
+- Each member row shows **invited by**, so the members can see how access spread.
+- Give access only to people you trust with the whole box.
+- A later version can keep deleted items for some days, so a member can undo a deletion.
+
+## 7. X25519 is not safe against future quantum computers
+
+**What:** A large quantum computer could break X25519 in the future. All age files in Secretbox use X25519: envelopes, items, names and invite files.
 
 **Who can use it:** A person who copies the database now and keeps it for many years.
 
-**Effect:** They could unlock those files in the future. The envelopes are not affected, because the fido2prf stanza uses only symmetric methods (HMAC, HKDF, ChaCha20-Poly1305).
+**Effect:** They could unlock those files in the future.
 
-**Fix:** Use hybrid post-quantum keys. Typage has `generateHybridIdentity()`. The change is small. Other systems then need age 1.3 or later to add items.
+**Fix:** Use hybrid post-quantum keys. Typage has `generateHybridIdentity()`. The passkey key would then come from the PRF output through a hybrid key derivation. Other systems then need age 1.3 or later to add items.
 
-## 10. A person cannot finish a stopped join through the page
+## 8. Sizes, times and counts are not locked
 
-**What:** If a join stops after the claim (step 6 of [scenario 5](05-use-invite.md)), the status becomes "used". The server allows the same person to try again. But the page shows "already used" to everybody, also to that person.
+**What:** The browser locks names and labels. It does not lock these: the size of each file, the time of each change, and the number of members and items. The server also knows which credential ID opens which box. It also sees IP addresses.
 
-**Effect:** The person cannot join. The invite file stays in the database (see flaw 3). A member must send a new link.
+**Who can use it:** A person with database or server access.
 
-**Fix:** If the status is "used" and the person is signed in, let the page try the claim. The server then decides.
+**Effect:** They can guess how active a box is, and how large each item is.
+
+**Fix:** Add random padding to items. This makes sizes less exact.
+
+## 9. The passkey label shows the box name and the person's name
+
+**What:** The phone saves each passkey with a label, for example "Finance 2026 – Nok". The password manager keeps it in clear text, and Apple or Google syncs it.
+
+**Who can use it:** A person who can look at the phone's password list. The password manager company.
+
+**Effect:** They see the box names and the person's name. They cannot open the box without Face ID.
+
+**Fix:** Use a neutral label. But then the passkey list is harder to use.
+
+## 10. An opened invite is lost if the tab closes
+
+**What:** **Open invite** uses up the link. The tab keeps the locked invite file, so a reload or a canceled Face ID can try again. If the person closes the tab before **Accept**, the link is gone.
+
+**Effect:** Nobody joined. A member must send a new link.
 
 ## 11. A lost passkey means lost access
 
-**What:** Only the passkey can unlock a person's envelope.
+**What:** Only the person's passkey can unlock their envelope.
 
-**Effect:** If a person loses a passkey that does not sync, they lose access. Synced passkeys (Apple, Google) make this less likely.
+**Effect:** If a person loses a passkey that does not sync, they lose access to that box. Synced passkeys (Apple, Google) make this less likely.
 
-**Fix:** Add an **Add device** action. Add a recovery key, printed on paper, for each box.
+**Fix:** Any member can send the person a new link. This is also how a person adds a device that does not sync. A member should then remove the old entry.
 
-## 12. No rate limits, no audit log, no way to cancel tokens
+## 12. No rate limits, no audit log
 
 **What:**
 
-- The server does not limit how many requests a person can send.
-- The server does not record who opened which item.
-- A member cannot cancel an ingest token in the app.
-- **Sign out** ends only the current session. Other sessions stay valid for 30 days.
+- The server does not limit how many requests a person can send. Anybody can make boxes.
+- The server does not record who opened which item. It does not know who a person is.
 
-**Fix:** Add these functions before real use.
+**Fix:** Add rate limits before real use.
 
 ## 13. Unlocked data stays in the browser tab
 
-**What:** The member private key stays in tab memory until the tab closes or the person selects **Lock**. The download link for an item stays in memory until the tab closes.
+**What:** The box private key and the access key stay in tab memory until the tab closes or the person selects **Lock**. The download link for an item stays in memory until the tab closes. During a join, the tab also keeps the locked invite file, and the address bar holds the one-time key.
 
 **Who can use it:** A person who uses the same unlocked device. A browser extension with access to the page.
 
@@ -186,49 +198,39 @@ Also, `GET /api/invites/:id` needs no sign-in. A person with the invite ID sees 
 
 ## 14. Passkey PRF support is not the same everywhere
 
-**What:** Apple Passwords and Google Password Manager support PRF. Some other password managers do not. Typage marks its passkey function as experimental.
+**What:** Apple Passwords, Google Password Manager and recent security keys support PRF. Some other password managers do not. Some devices give the PRF output only when a person uses a passkey, so making a passkey needs two Face IDs there.
 
-**Effect:** Some people cannot make an account. The app shows a message during sign-up.
+**Effect:** Some people cannot make a passkey that opens a box. The app shows a message.
 
-## 15. Every member can do everything
+## Fixed in this version
 
-**What:** There are no roles. Each member can:
-
-- invite any person, and those people can invite more people,
-- remove any other member, also the person who made the box,
-- delete items,
-- make ingest tokens.
-
-**Who can use it:** Any member, for example a careless member or a member whose device is stolen.
-
-**Effect:** Access can spread further than the first person wanted. One member can remove others or delete data.
-
-This is a deliberate choice. Encryption cannot make a member "read only": each member has the box private key and can copy each item. Roles were only a server rule.
-
-**How to decrease the risk:**
-
-- Each member row shows **invited by**, so the members can see how access spread.
-- Give access only to people you trust with the whole box.
-- If a member leaves the group, remove them. This changes the box key.
-- A later version can keep deleted items for some days, so a member can undo a deletion.
+| Flaw in the first version | What changed |
+|---|---|
+| Expired invites kept the invite file. | The server deletes the row when a person uses the link, when a member cancels it, and after the time limit. |
+| A stopped join could not continue. | The tab keeps the locked invite file. A reload or a canceled Face ID can try again. |
+| Names, box names and item names were not locked. | They are in name files and labels now. The join page shows nothing before **Open invite**. |
+| The server could give a wrong public key. | The browser checks the box public key against the box private key. The server cannot make a false envelope, because it never gets a passkey public key. |
+| A stolen member key also opened future key copies. | There are no member keys and no key copies. |
 
 ## What Secretbox does protect
 
 | Threat | Protected? |
 |---|---|
-| A person steals the database or a backup | Yes. Only locked files, public keys and hashes. Exceptions: flaws 3, 4 and 7. |
+| A person steals the database or a backup | Yes. Only locked files, public keys and hashes. Exceptions: flaws 4 and 8. |
 | A person reads network traffic | Yes. HTTPS. Also, private keys and data are never sent. |
-| A person uses a link a second time | Yes. The server allows one claim only. |
-| A link preview in a chat app | Yes. Opening the page changes nothing. |
+| A person uses a link a second time | Yes. The server deletes the invite when the first person opens it. |
+| A link preview in a chat app | Yes. Previews send `GET`. Only the `POST` of **Open invite** uses the invite. |
 | A changed or damaged age file | Yes. The header check and the payload tags find each change. |
-| Another website sends requests as the user | Yes. The server requires the `x-secretbox` header, and the cookie is `SameSite=Lax`. |
+| The server gives a false public key or envelope | Yes. See "Fixed in this version". |
+| Another website sends requests as the user | Yes. There are no cookies. Each request needs the access key, and other websites cannot read it. |
 | A person controls the server code | **No.** See flaw 1. |
+| A removed member who kept the box private key | **No.** See flaw 2. |
 
 ## Technical details
 
 - [age file format](technical/age-format.md)
-- [Passkey PRF and the fido2prf stanza](technical/passkey-prf.md)
-- [Passkey sign-up, sign-in and sessions](technical/webauthn-and-sessions.md)
+- [Passkey PRF](technical/passkey-prf.md)
+- [Passkeys, access keys and add keys](technical/passkeys-and-access-keys.md)
 - [API calls and database statements](technical/api-and-sql.md)
 
 [← Previous](07-storage.md) · [All documents](README.md)

@@ -11,10 +11,6 @@ import { migrate, type Db } from "./db.ts";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const STATIC_DIR = process.env.STATIC_DIR ?? "dist";
-const ORIGINS = (process.env.ORIGINS ?? `http://localhost:${PORT},http://localhost:5173`)
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
 
 let db: Db;
 let where: string;
@@ -30,7 +26,7 @@ if (process.env.DATABASE_URL) {
 }
 await migrate(db);
 
-const app = createApp(db, { origins: () => ORIGINS });
+const app = createApp(db);
 
 if (existsSync(`${STATIC_DIR}/index.html`)) {
   app.use("/assets/*", serveStatic({ root: STATIC_DIR }));
@@ -41,5 +37,5 @@ if (existsSync(`${STATIC_DIR}/index.html`)) {
 }
 
 serve({ fetch: app.fetch, port: PORT }, () => {
-  console.log(`Secretbox on http://localhost:${PORT}  (${where}; origins ${ORIGINS.join(", ")})`);
+  console.log(`Secretbox on http://localhost:${PORT}  (${where})`);
 });

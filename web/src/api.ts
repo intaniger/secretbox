@@ -1,5 +1,3 @@
-import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
-
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -8,17 +6,18 @@ export class ApiError extends Error {
   }
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { "x-secretbox": "1" };
+/** `key` is the box's access key, for member requests. There are no cookies. */
+async function call<T>(method: string, path: string, key?: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (key) headers.authorization = `Bearer ${key}`;
   let payload: BodyInit | undefined;
-  if (body instanceof Uint8Array) {
-    headers["content-type"] = "application/octet-stream";
-    payload = body as Uint8Array<ArrayBuffer>;
+  if (body instanceof FormData) {
+    payload = body; // the browser sets the multipart content type
   } else if (body !== undefined) {
     headers["content-type"] = "application/json";
     payload = JSON.stringify(body);
   }
-  const res = await fetch(path, { method, headers, body: payload, credentials: "same-origin" });
+  const res = await fetch(path, { method, headers, body: payload, credentials: "omit" });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new ApiError(res.status, err.error ?? res.statusText);
@@ -30,53 +29,20 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export const api = {
-  get: <T>(path: string) => call<T>("GET", path),
-  post: <T>(path: string, body?: unknown) => call<T>("POST", path, body ?? {}),
-  put: <T>(path: string, body?: unknown) => call<T>("PUT", path, body ?? {}),
-  del: <T>(path: string) => call<T>("DELETE", path),
+  get: <T>(path: string, key?: string) => call<T>("GET", path, key),
+  post: <T>(path: string, body: unknown, key?: string) => call<T>("POST", path, key, body),
+  del: <T>(path: string, key: string) => call<T>("DELETE", path, key),
 };
 
-// --- Types returned by the server ------------------------------------------
+// --- What the server returns. Every "...Locked" field is a base64 age file. ---
 
-export type Me = {
+export type BoxResponse = {
   id: string;
-  nickname: string;
-  memberRecipient: string | null;
-  passkey: { id: string; transports: string[]; hasEnvelope: boolean };
+  publicKey: string;
+  nameLocked: string;
+  hasAddKey: boolean;
+  members: { credentialId: string; nameLocked: string; createdAt: number }[];
+  /** `labelLocked` is null for data from an outside system. `size` is the locked size. */
+  items: { id: string; labelLocked: string | null; size: number; createdAt: number }[];
+  invites: { id: string; nameLocked: string; expiresAt: number }[];
 };
-
-export type BoxSummary = { id: string; name: string; item_count: number; member_count: number };
-
-export type BoxDetail = {
-  box: { id: string; name: string; recipient: string; keyVersion: number; keyHistory: string | null };
-  me: { userId: string; keyCopy: string };
-  /** `name` is how the person appears in this box. `invitedBy` is null for the person who made the box. */
-  members: { userId: string; name: string; recipient: string; joinedAt: number; invitedBy: string | null }[];
-  items: { id: string; name: string; size: number; source: string; createdAt: number; addedBy: string | null }[];
-  invites: { id: string; name: string; status: string; invitedBy: string | null; expiresAt: number }[];
-  ingestTokens: { label: string; createdAt: number }[];
-};
-
-export type InviteInfo = {
-  boxId: string;
-  boxName: string;
-  /** The invited person's name, typed by the person who made the invite. */
-  name: string;
-  invitedBy: string;
-  status: "open" | "used" | "expired" | "canceled";
-  expiresAt: number;
-};
-
-// --- Passkey ceremonies (login identity; PRF is enabled for encryption) ------
-
-export async function registerPasskey(nickname: string): Promise<void> {
-  const { flowId, options } = await api.post<{ flowId: string; options: any }>("/api/register/options", { nickname });
-  const response = await startRegistration({ optionsJSON: options });
-  await api.post("/api/register/verify", { flowId, response });
-}
-
-export async function signInWithPasskey(): Promise<void> {
-  const { flowId, options } = await api.post<{ flowId: string; options: any }>("/api/login/options");
-  const response = await startAuthentication({ optionsJSON: options });
-  await api.post("/api/login/verify", { flowId, response });
-}

@@ -1,150 +1,146 @@
-# Technical details: passkey PRF and the fido2prf stanza
+# Technical details: passkey PRF
 
 [← All documents](../README.md)
 
-A passkey can sign, but it cannot unlock. The **PRF extension** of WebAuthn adds one function: the passkey calculates a fixed 32-byte value from an input. Typage uses this value to lock and unlock the file key of an age file. The stanza type is `age-encryption.org/fido2prf`.
+This document shows how one passkey gives one **passkey key**: an age X25519 key pair. The passkey key locks and unlocks the member's envelope. Steps C3–C4 of [scenario 1](../01-create-box.md), O1–O2 of [scenario 2](../02-open-box.md) and J7–J8 of [scenario 5](../05-use-invite.md) use it.
 
-The example is Tiger's envelope from [scenario 1](../01-new-user-new-box.md). The example simulates the passkey, because a real passkey never shows its hidden secret.
+The code is in [web/src/passkey.ts](../../web/src/passkey.ts).
 
-## PRF: input and output
+## What PRF is
 
-```
-output = HMAC-SHA-256(hidden_secret, SHA-256("WebAuthn PRF" || 0x00 || input))
-```
+PRF is a WebAuthn extension ([spec](https://w3c.github.io/webauthn/#prf-extension)). It uses the CTAP2 `hmac-secret` extension of the authenticator.
 
-| Who | What it does |
-|---|---|
-| The web page | Gives an input. |
-| The browser | Calculates `SHA-256("WebAuthn PRF" || 0x00 || input)`. This makes sure that a web page cannot send raw values to the passkey. |
-| The passkey | Asks for Face ID or a fingerprint. Then it calculates the HMAC with its hidden secret. The CTAP2 name for this is `hmac-secret`. |
-| The browser | Gives the 32-byte output to the page. The hidden secret stays in the passkey. |
+- When the authenticator makes a passkey, it also makes a random secret for it. This secret never leaves the authenticator.
+- For each request, the authenticator calculates HMAC-SHA-256 with that secret and a salt. The result is 32 bytes.
+- The authenticator does this only after user verification: Face ID, a fingerprint or a PIN.
 
-Properties:
-
-| Property | Meaning |
-|---|---|
-| Repeatable | The same passkey and the same input always give the same output. |
-| Unpredictable | A different input gives an output that has no relation to the first output. |
-| Personal | A different passkey gives a different output for the same input. |
-| One-way | The output does not show the hidden secret. |
-| Needs the person | The passkey requires user verification (Face ID, fingerprint or PIN) for each request. |
-
-One request can calculate two outputs: `first` and `second`.
-
-### The browser call
-
-```js
-const credential = await navigator.credentials.get({
-  publicKey: {
-    allowCredentials: [{ type: "public-key", id: credentialId, transports }],
-    challenge: random16,             // not used by Secretbox
-    userVerification: "required",
-    extensions: { prf: { eval: { first: input1, second: input2 } } },
-  },
-});
-const { first, second } = credential.getClientExtensionResults().prf.results;
-```
-
-## The fido2prf stanza: lock a file key
+The website does not send the salt directly. The browser makes it from the website's input:
 
 ```
-label  = "age-encryption.org/fido2prf"
-nonce  = 16 random bytes                    → rz/XB5+tax7mwcIJowbCPQ (base64, in the stanza line)
-
-input1 = label || 0x01 || nonce
-       = 6167652d656e6372797074696f6e2e6f72672f6669646f3270726601af3fd7079fad6b1ee6c1c209a306c23d
-input2 = label || 0x02 || nonce
-       = 6167652d656e6372797074696f6e2e6f72672f6669646f3270726602af3fd7079fad6b1ee6c1c209a306c23d
+salt       = SHA-256("WebAuthn PRF" || 0x00 || input)       ← the browser
+prf_output = HMAC-SHA-256(passkey_secret, salt)              ← the authenticator
 ```
 
-The browser hashes each input:
-
-```
-salt1 = SHA-256("WebAuthn PRF" || 0x00 || input1) = 6fef2f565bb9518e57f11c4db9a6b1a9fb5f8d8901ac2774a243d21fea879d89
-salt2 = SHA-256("WebAuthn PRF" || 0x00 || input2) = 1f19f1ac8eb727015e73d9d1099b537c3f6f33618f37de3b075ee546d92024ef
-```
-
-After Face ID, the passkey calculates:
-
-```
-output1 = HMAC-SHA-256(hidden_secret, salt1) = add6282257e13a4caa17202b171827d4f0d7eb05985d333b065865ffdcb01d76
-output2 = HMAC-SHA-256(hidden_secret, salt2) = 752b4f4795cd974d5fe7b0dc1a673e7a8f2f776f7ef67d4c8c0e5e4427c98cfe
-```
-
-Typage makes the wrap key and locks the file key:
-
-```
-wrap_key = HKDF-Extract(SHA-256, salt = label, ikm = output1 || output2)
-         = 7b1ee88fcb85256e0265cefbe65fa5f7e58bb547b640a73ecb8937b26e09fbfb
-
-file_key = bd991a3d7a99a5c2f3863b04757ce9ee
-body     = ChaCha20-Poly1305(wrap_key, 12 zero bytes).seal(file_key)
-         = xnsO+7fJA1pe0ly2jfVIiOX/HbmnRrUdu+31Z4b8MLM
-```
-
-The stanza:
-
-```
--> age-encryption.org/fido2prf rz/XB5+tax7mwcIJowbCPQ
-xnsO+7fJA1pe0ly2jfVIiOX/HbmnRrUdu+31Z4b8MLM
-```
-
-The rest of the file (header check and payload) is the same as for all age files. See [age-format.md](age-format.md).
-
-## Unlock
+The prefix stops a website from asking for values that another protocol uses.
 
 ```mermaid
-flowchart TD
-  N["Nonce from the stanza"] --> I["input1 and input2"]
-  I --> B["Browser: SHA-256 with WebAuthn PRF prefix"]
-  B --> P["Passkey: HMAC with the hidden secret,<br/>after Face ID"]
-  P --> O["output1 and output2"]
-  O --> W["HKDF-Extract: wrap key"]
-  W --> F["ChaCha20-Poly1305: file key"]
-  F --> R["Header check and payload:<br/>the member private key"]
+flowchart LR
+  IN["Input<br/>secretbox passkey key v1"] --> BR["Browser<br/>SHA-256 with prefix"]
+  BR -->|salt| AU["Authenticator<br/>HMAC-SHA-256"]
+  SEC["Hidden passkey secret"] --> AU
+  FACE["Face ID"] --> AU
+  AU -->|32 bytes| OUT["PRF output<br/>= passkey private key"]
 ```
 
-The steps are the same as the lock steps. The nonce comes from the stanza line. Because PRF is repeatable, the outputs and the wrap key are the same. If the passkey is wrong, the outputs are different and the Poly1305 tag check fails.
+## The input and the outputs
 
-## Why two outputs
-
-The file needs **both** outputs. One passkey request gives at most two outputs. So one Face ID can unlock one file only. A changed page cannot unlock a second file with the same Face ID.
-
-## Why a new nonce for each file
-
-Each file has its own nonce, so each file has its own wrap key. Without the passkey, nobody can see that two envelopes belong to the same passkey.
-
-## Why only the owner can lock
-
-The lock steps also need the passkey and Face ID. This is a **symmetric** lock: there is no public part. Another member cannot lock data for Nok's passkey.
-
-This is why Secretbox has a member key between the passkey and the box key. The member **public** key lets other members lock key copies for Nok at any time, without her passkey.
-
-## How the page selects the correct passkey
-
-Typage accepts an identity string. With it, the browser asks for this passkey only. The string is Bech32 text of a small CBOR value:
+Secretbox always uses the same input: `secretbox passkey key v1`.
 
 ```
-CBOR [ 1, credential ID (bytes), passkey domain (text), transports (list of text) ]
+input        = "secretbox passkey key v1"
+salt         = SHA-256("WebAuthn PRF" || 0x00 || input)
+             = 760aa987e59e5f6d53840635dba57a7b90bb8458653b9a36319afd4cd7406cb4
 ```
 
-Secretbox builds this string in `web/src/keys.ts` (`passkeyIdentity`). It uses the credential ID and the transports from the server, and the domain of the page. For Tiger:
+Each passkey has its own hidden secret, so each passkey gives a different output:
 
-| Part | Value |
+| Passkey | Hidden secret (simulated) | PRF output |
+|---|---|---|
+| Finance 2026 – Tiger | `f65b8482512addd8…` | `102c876b3d31d206f10e639306a2e8477845c7a78b9676faa1b3c2b19d739499` |
+| HR 2027 – Tiger | `247d74f9872fe2ed…` | `07137eb0500ce07eb7ab4ce642800f83c626da4db8ae5d261a0b1b6efa944d75` |
+| Finance 2026 – Nok | `a9dbe58eb2103f12…` | `e569a0f8789aec478271a2a84ac0f039af616dd9ecf61dca5b310d980358381f` |
+
+A real passkey never shows its hidden secret. The script [example-data.mjs](example-data.mjs) simulates it with the same formulas.
+
+The same passkey and the same input always give the same output. So the browser gets the same passkey key each time Tiger opens the box.
+
+## From the PRF output to the passkey key
+
+The 32 bytes of the PRF output are the X25519 private key. No other step is necessary.
+
+```
+passkey_private = prf_output                                   (32 bytes)
+                = 102c876b3d31d206f10e639306a2e8477845c7a78b9676faa1b3c2b19d739499
+as text         = Bech32("AGE-SECRET-KEY-", passkey_private), upper case
+                = AGE-SECRET-KEY-1ZQKGW6EAX8FQDUGWVWFSDGHGGAUYT3A83WT8D74PK0PTR8TNJJVSPV3UMU
+passkey_public  = X25519(passkey_private, basepoint)
+as text         = age1l88akkymhz39h3fthp04q8ghcxt626aqjc3lztyx5s3er96x25dstpqevm
+```
+
+In the code:
+
+```ts
+const identity = bech32.encode("AGE-SECRET-KEY-", bech32.toWords(prfOutput), false).toUpperCase();
+const recipient = await age.identityToRecipient(identity);
+```
+
+**Why the output can be the key directly.** An X25519 private key can be any 32 bytes. X25519 sets a few bits itself ("clamping"). The PRF output is 32 bytes from HMAC-SHA-256, so it is uniformly random for anybody without the passkey. Secretbox uses this input for this one purpose only. The `v1` in the input lets a later version make different keys.
+
+## Make a passkey (scenarios 1 and 5)
+
+```ts
+navigator.credentials.create({ publicKey: {
+  rp: { id: location.hostname, name: "Secretbox" },
+  user: { id: utf8(boxId), name: "Finance 2026 – Nok", displayName: "Finance 2026 – Nok" },
+  challenge: randomBytes(32),
+  pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -8 }, { type: "public-key", alg: -257 }],
+  authenticatorSelection: { residentKey: "required", userVerification: "required" },
+  extensions: { prf: { eval: { first: utf8("secretbox passkey key v1") } } },
+} })
+```
+
+| Option | Why |
 |---|---|
-| Version | `1` |
-| Credential ID | `nIqF2ASScSdBg5JqLm1Kcw` |
-| Passkey domain | `secretbox-nu.vercel.app` |
-| Transports | `["internal", "hybrid"]` |
-| CBOR bytes | `01509c8a85d8049271274183926a2e6d4a7377736563…` |
-| Identity string | `AGE-PLUGIN-FIDO2PRF-1Q9GFEZ59MQZFYUF8GXPEY63WD498XAMNV43HYET5VFHHSTTWW5H8VETJVDJKCTNPWPCGY6RFDE6X2UNWV9KXV6REVFEXJEQWY53SY` |
+| `user.id` = the box ID | One passkey for each box. A new passkey with the same user ID replaces the old one on that device. The box ID comes back when a person uses the passkey. |
+| `user.name` = box name and person name | The phone shows it in its passkey list. See [flaw 9](../08-security.md#9-the-passkey-label-shows-the-box-name-and-the-persons-name). |
+| `residentKey: "required"` | The passkey must be "discoverable", so the phone can list it without a credential ID from the website. |
+| `userVerification: "required"` | PRF needs Face ID, a fingerprint or a PIN. |
+| `challenge` | Random, but nobody checks it. The server does not use the passkey to sign in. |
+| `prf.eval` | Ask for the PRF output now. |
 
-Typage's own CBOR reader decodes this string correctly. The string is not secret: it only names the passkey.
+The answer has `prf.enabled`. If it is not `true`, the passkey cannot give a PRF output, and the browser stops with a message.
 
-## Limits
+**One or two Face IDs.** Some authenticators calculate the PRF output while they make the passkey. Then the answer has `prf.results.first`, and one Face ID is enough. Other authenticators give only `prf.enabled: true`. Then the browser uses the new passkey one time, with `allowCredentials` set to its credential ID. That is the second Face ID.
 
-- The passkey works only on its domain. Secretbox passkeys work only on `secretbox-nu.vercel.app`.
-- The provider must support PRF. Apple Passwords and Google Password Manager do. Some other password managers do not. The server checks `prf.enabled` during sign-up and refuses passkeys without PRF.
-- Typage marks this function as experimental.
+## Use a passkey (scenario 2)
+
+```ts
+navigator.credentials.get({ publicKey: {
+  rpId: location.hostname,
+  challenge: randomBytes(32),
+  userVerification: "required",
+  allowCredentials: [],
+  extensions: { prf: { eval: { first: utf8("secretbox passkey key v1") } } },
+} })
+```
+
+`allowCredentials: []` lets the phone show all passkeys of the site. The person selects one. The answer gives:
+
+| Field | Example | Use |
+|---|---|---|
+| `rawId` | `jnx3yrksw0nZ_pk2v1xPmQ` (base64url) | Finds the member row: `GET /api/boxes/:id/envelopes/:credentialId` |
+| `response.userHandle` | `Ze3WdI5DdSbboy05-E6vhQ` | The box ID |
+| `prf.results.first` | `102c876b3d31d206…` | The passkey private key |
+
+So one Face ID gives the box, the passkey and the key. The browser needs no list of boxes.
+
+## Why not the fido2prf stanza
+
+The first version of Secretbox used Typage's passkey support: a `fido2prf` stanza in the envelope. That stanza uses a new random nonce for each file, and the nonce is part of the PRF input. So the browser must have the file, and know the passkey, **before** it asks for Face ID.
+
+Without accounts, the browser does not know the box before the person selects a passkey. With the `fido2prf` stanza, it would need two Face IDs: one to find the passkey, and one for the PRF output. Or each device would need a list of passkeys.
+
+A fixed input gives one key for each passkey. One Face ID is then enough. The cost: the envelope now uses an X25519 stanza, like the other files. See [flaw 7](../08-security.md#7-x25519-is-not-safe-against-future-quantum-computers).
+
+## Support
+
+| Passkey provider | PRF |
+|---|---|
+| Apple Passwords (iOS 18, macOS 15 and later) | Yes |
+| Google Password Manager (Chrome 132 and later) | Yes |
+| Recent security keys (`hmac-secret`) | Yes |
+| Some other password managers | No, or not yet |
+
+The end-to-end test uses Chrome's virtual authenticator with PRF. It also tests a device that gives the PRF output only when a person uses a passkey.
 
 [← All documents](../README.md)
