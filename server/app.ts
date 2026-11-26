@@ -122,7 +122,7 @@ export function createApp(db: Db): Hono {
       "SELECT envelope FROM members WHERE box_id = ? AND credential_id = ?",
       c.req.param("id"), c.req.param("credentialId"),
     );
-    if (!row) bad("This passkey does not open this box. It was removed, or the box was deleted.", 404);
+    if (!row) bad("This passkey can't open this box anymore. You may have been removed, or the box was deleted.", 404);
     return c.json({ envelope: toB64(row!.envelope) });
   });
 
@@ -219,7 +219,7 @@ export function createApp(db: Db): Hono {
   // Making a new add key replaces the old one.
   app.post("/api/boxes/:id/add-key", async (c) => {
     const boxId = await member(c);
-    const addKey = `sbx_${newId(24)}`;
+    const addKey = `vlt_${newId(24)}`;
     await db.run("UPDATE boxes SET add_hash = ? WHERE id = ?", sha256(addKey), boxId);
     return c.json({ addKey });
   });

@@ -14,7 +14,11 @@ export const lock = () => {
   opened = null;
 };
 
-/** A name as it appears in a box. `invitedBy` is null for the person who made the box. */
+/**
+ * A name as it appears in a box. The person who invites types the name, so
+ * the person who made the box has none: `name` is "" for them. `invitedBy` is
+ * null for the person who made the box, and "" for people they invited.
+ */
 export type Person = { name: string; invitedBy: string | null };
 type Label = { name: string; type: string; size: number; addedBy: string };
 
@@ -40,7 +44,7 @@ const unlockJson = async <T>(identity: string, b64: string): Promise<T> =>
  */
 async function checkPublicKey(identity: string, publicKey: string) {
   if ((await keys.publicKeyOf(identity)) !== publicKey) {
-    throw Error("The server gave a wrong public key for this box. Do not add data, and tell the other members.");
+    throw Error("Vault Box sent the wrong key for this box, so it isn't safe to use. Don't add anything, and tell the other people in this box.");
   }
 }
 
@@ -86,11 +90,12 @@ export async function load(): Promise<Box> {
 /**
  * Make a box: a new box key pair, a new passkey for it, and an envelope that
  * locks the box private key to the passkey key. 1 or 2 prompts.
+ * The maker types no name: nobody else is there yet to see it.
  */
-export async function createBox(boxName: string, myName: string): Promise<string> {
+export async function createBox(boxName: string): Promise<string> {
   const box = await keys.newKeyPair();
   const boxId = keys.randomId();
-  const passkey = await createPasskey(boxId, `${boxName} – ${myName}`);
+  const passkey = await createPasskey(boxId, boxName);
   const access = await keys.accessKey(box.identity);
   await api.post("/api/boxes", {
     id: boxId,
@@ -99,7 +104,7 @@ export async function createBox(boxName: string, myName: string): Promise<string
     member: {
       credentialId: passkey.credentialId,
       envelope: keys.toB64(await keys.lockTo(passkey.key.recipient, box.identity)),
-      nameLocked: await lockJson(box.recipient, { name: myName, invitedBy: null } satisfies Person),
+      nameLocked: await lockJson(box.recipient, { name: "", invitedBy: null } satisfies Person),
     },
   }, access);
   opened = { boxId, credentialId: passkey.credentialId, identity: box.identity, access };

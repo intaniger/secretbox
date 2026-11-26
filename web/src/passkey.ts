@@ -12,6 +12,8 @@
 
 import * as keys from "./keys.ts";
 
+// Frozen: this text keeps the app's old name (Secretbox). Every existing
+// passkey key comes from it, so a change would lock everyone out of their boxes.
 const PRF_INPUT = new TextEncoder().encode("secretbox passkey key v1");
 const prfRequest = { prf: { eval: { first: PRF_INPUT } } } as AuthenticationExtensionsClientInputs;
 const challenge = () => crypto.getRandomValues(new Uint8Array(32)); // nobody checks it: no server login
@@ -19,7 +21,7 @@ const challenge = () => crypto.getRandomValues(new Uint8Array(32)); // nobody ch
 export type Passkey = { credentialId: string; boxId: string; key: keys.KeyPair };
 
 const NO_PRF =
-  "This passkey can't unlock data (no PRF support). Use Apple Passwords, Google Password Manager, or a recent security key.";
+  "This passkey can't encrypt data. Save it in Apple Passwords or Google Password Manager, or use a recent security key.";
 
 function prfOutput(cred: PublicKeyCredential): Uint8Array | undefined {
   const first = (cred.getClientExtensionResults() as any).prf?.results?.first as ArrayBuffer | ArrayBufferView | undefined;
@@ -30,12 +32,13 @@ function prfOutput(cred: PublicKeyCredential): Uint8Array | undefined {
 /**
  * Make a new passkey for a box. 1 prompt if the authenticator gives the PRF
  * output while it makes the passkey, otherwise 2 (make it, then use it once).
- * `label` is what the device's passkey list shows, e.g. "Finance 2026 – Nok".
+ * `label` is what the device's passkey list shows, e.g. "Finance 2026" for the
+ * person who made the box, or "Finance 2026 – Nok" for a person invited as Nok.
  */
 export async function createPasskey(boxId: string, label: string): Promise<Passkey> {
   const cred = (await navigator.credentials.create({
     publicKey: {
-      rp: { id: location.hostname, name: "Secretbox" },
+      rp: { id: location.hostname, name: "Vault Box" },
       user: { id: new TextEncoder().encode(boxId), name: label, displayName: label },
       challenge: challenge(),
       pubKeyCredParams: [
@@ -60,7 +63,7 @@ export async function createPasskey(boxId: string, label: string): Promise<Passk
  */
 export async function getPasskey(allow?: string[]): Promise<Passkey> {
   const { credentialId, boxId, secret } = await usePasskey(allow);
-  if (!boxId) throw Error("This passkey was not made by Secretbox.");
+  if (!boxId) throw Error("This passkey was not made by Vault Box.");
   return { credentialId, boxId, key: await keys.keyPairFromSecret(secret) };
 }
 

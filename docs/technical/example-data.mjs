@@ -143,36 +143,38 @@ const json = (v) => JSON.stringify(v);
 const now = Date.parse("2026-11-26T09:00:00Z");
 
 // 01: Tiger makes "Finance 2026". The box ID is the passkey's user ID.
+// Nobody names the person who makes a box, so Tiger's name in the box is "".
 const financeId = b64url(randomBytes(16));
 const financeBox = await keyPair();
-const tigerPasskey = passkey(financeId, "Finance 2026 – Tiger");
+const tigerPasskey = passkey(financeId, "Finance 2026");
 const tigerKey = passkeyKey(tigerPasskey);
 const tigerEnvelope = lockTo(tigerKey.recipient, financeBox.identity);
 const financeAccess = accessKey(financeBox);
 const financeName = lockTo(financeBox.recipient, "Finance 2026");
-const tigerName = lockTo(financeBox.recipient, json({ name: "Tiger", invitedBy: null }));
+const tigerNameText = json({ name: "", invitedBy: null });
+const tigerName = lockTo(financeBox.recipient, tigerNameText);
 
 // 02: Tiger makes "HR 2027" too: a second passkey, with a different key.
 const hrId = b64url(randomBytes(16));
 const hrBox = await keyPair();
-const tigerHrPasskey = passkey(hrId, "HR 2027 – Tiger");
+const tigerHrPasskey = passkey(hrId, "HR 2027");
 const tigerHrKey = passkeyKey(tigerHrPasskey);
 const tigerHrEnvelope = lockTo(tigerHrKey.recipient, hrBox.identity);
 const hrAccess = accessKey(hrBox);
 
 // 03: Tiger adds a note: a locked label and the locked data.
 const noteText = "Salary sheet: Nok 50k";
-const labelText = json({ name: "note.txt", type: "text/plain", size: utf8(noteText).length, addedBy: "Tiger" });
+const labelText = json({ name: "note.txt", type: "text/plain", size: utf8(noteText).length, addedBy: "" });
 const noteLabel = lockTo(financeBox.recipient, labelText);
 const note = lockTo(financeBox.recipient, noteText);
-const addKey = `sbx_${b64url(randomBytes(24))}`;
+const addKey = `vlt_${b64url(randomBytes(24))}`;
 
-// 04: Tiger makes an invite for Nok.
+// 04: Tiger makes an invite for Nok. He has no name in the box, so invitedBy is "".
 const oneTime = await keyPair();
 const inviteId = b64url(randomBytes(16));
-const inviteText = json({ boxKey: financeBox.identity, name: "Nok", invitedBy: "Tiger" });
+const inviteText = json({ boxKey: financeBox.identity, name: "Nok", invitedBy: "" });
 const inviteFile = lockTo(oneTime.recipient, inviteText);
-const inviteName = lockTo(financeBox.recipient, json({ name: "Nok", invitedBy: "Tiger" }));
+const inviteName = lockTo(financeBox.recipient, json({ name: "Nok", invitedBy: "" }));
 
 // 05: Nok opens the invite and joins with her own passkey for this box.
 const opened = JSON.parse(await openWith(oneTime.identity, inviteFile.file));
@@ -180,7 +182,7 @@ const nokAccess = accessKey({ identity: opened.boxKey });
 const nokPasskey = passkey(financeId, "Finance 2026 – Nok");
 const nokKey = passkeyKey(nokPasskey);
 const nokEnvelope = lockTo(nokKey.recipient, opened.boxKey);
-const nokName = lockTo(financeBox.recipient, json({ name: "Nok", invitedBy: "Tiger" }));
+const nokName = lockTo(financeBox.recipient, json({ name: "Nok", invitedBy: "" }));
 
 // Check every file with Typage, the app's own key code, and the full reading chain.
 const appKeyOf = async (k) => (await appKeys.keyPairFromSecret(Buffer.from(k.prfOutputHex, "hex"))).recipient;
@@ -192,11 +194,11 @@ const checks = {
   tigerEnvelope: (await openWith(tigerKey.identity, tigerEnvelope.file)) === financeBox.identity,
   tigerHrEnvelope: (await openWith(tigerHrKey.identity, tigerHrEnvelope.file)) === hrBox.identity,
   financeName: (await openWith(financeBox.identity, financeName.file)) === "Finance 2026",
-  tigerName: JSON.parse(await openWith(financeBox.identity, tigerName.file)).name === "Tiger",
+  tigerName: (await openWith(financeBox.identity, tigerName.file)) === tigerNameText,
   noteLabel: (await openWith(financeBox.identity, noteLabel.file)) === labelText,
   note: (await openWith(financeBox.identity, note.file)) === noteText,
   inviteFile: opened.boxKey === financeBox.identity && opened.name === "Nok",
-  inviteName: JSON.parse(await openWith(financeBox.identity, inviteName.file)).invitedBy === "Tiger",
+  inviteName: JSON.parse(await openWith(financeBox.identity, inviteName.file)).invitedBy === "",
   nokAccessSameAsTiger: nokAccess.key === financeAccess.key,
   nokEnvelope: (await openWith(nokKey.identity, nokEnvelope.file)) === financeBox.identity,
   nokReadsNote: await (async () => {
@@ -221,7 +223,7 @@ const data = {
     passkey: { credentialId: tigerPasskey.credentialId, userId: tigerPasskey.userId, label: tigerPasskey.label, hiddenSecretHex: hex(tigerPasskey.hiddenSecret) },
     passkeyKey: tigerKey,
     envelope: tigerEnvelope.out,
-    nameText: json({ name: "Tiger", invitedBy: null }),
+    nameText: tigerNameText,
     nameLocked: tigerName.out,
   },
   hrBox: {
@@ -235,7 +237,7 @@ const data = {
   invite: {
     id: inviteId,
     oneTime,
-    link: `https://secretbox-nu.vercel.app/join/${inviteId}#${oneTime.identity}`,
+    link: `https://vlt.i7r.tech/join/${inviteId}#${oneTime.identity}`,
     contents: inviteText,
     file: inviteFile.out,
     nameLocked: inviteName.out,

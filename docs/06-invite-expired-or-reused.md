@@ -12,7 +12,7 @@ The server gives one answer for all cases. The row is gone, so the server cannot
 
 Mallory finds Nok's link in an old chat. Nok used it before.
 
-1. Open the link. The page says "Somebody invited you to a box".
+1. Open the link. The page says "You're invited to a box".
 2. Select **Open invite**.
 3. The page shows "This link no longer works" and the reason: "This link was already used, has expired, or was canceled."
 4. Mallory gets nothing: no box name, no names, no key.
@@ -32,7 +32,7 @@ sequenceDiagram
   participant B as Browser
   participant S as Server
   M->>B: Open the old link, Open invite
-  B->>S: POST /api/invites/iFhx-052UgwYFJqH7AhiuA/claim
+  B->>S: POST /api/invites/crUC8B9PQQSYQ_-CBMvj7A/claim
   Note over S: DELETE … WHERE id = ? AND expires_at > now: 0 rows
   S-->>B: 404 This link was already used, has expired, or was canceled
   B->>M: The message
@@ -51,16 +51,16 @@ sequenceDiagram
 
 | Step | Input | Method | Output | Goes to |
 |---|---|---|---|---|
-| R1. Read the link | The link. | The browser reads the `#` part. | One-time private key `AGE-SECRET-KEY-1VVSKC8UZAP…` | R3 |
-| R2. Claim | The invite ID `iFhx-052UgwYFJqH7AhiuA`. | The server first deletes all expired invites. Then it runs `DELETE FROM invites WHERE id = ? AND expires_at > ? RETURNING box_id, invite_file`. | 0 rows. HTTP 404. | R3 |
+| R1. Read the link | The link. | The browser reads the `#` part. | One-time private key `AGE-SECRET-KEY-15ZZXCTU7YG…` | R3 |
+| R2. Claim | The invite ID `crUC8B9PQQSYQ_-CBMvj7A`. | The server first deletes all expired invites. Then it runs `DELETE FROM invites WHERE id = ? AND expires_at > ? RETURNING box_id, invite_file`. | 0 rows. HTTP 404. | R3 |
 | R3. Unlock | The one-time private key (R1). No invite file. | Nothing to unlock. | Nothing. | |
 
 ## Another person uses the link first
 
 This case is different. The link goes to a group chat by mistake. Mallory opens it **before** Nok.
 
-1. Mallory selects **Open invite**, then **Accept and make passkey**. She joins the box.
-2. The member list shows her as "Nok, invited by Tiger", because Tiger typed that name.
+1. Mallory selects **Open invite**, then **Accept and save passkey**. She joins the box.
+2. The member list shows her as "Nok", invited by the box creator, because Tiger typed the name "Nok".
 3. Later, the real Nok opens the link. She sees "already used".
 
 ```mermaid

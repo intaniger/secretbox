@@ -50,7 +50,7 @@ createServer((req, res) => {
     if (filesystemDone || dest.pathname === "/index.html") return serveFile(res, join(OUT, "static", dest.pathname));
   }
   res.writeHead(404).end("Not found");
-}).listen(PORT, () => console.log(`Secretbox on http://localhost:${PORT} (Vercel build output, pg -> PGlite socket)`));
+}).listen(PORT, () => console.log(`Vault Box on http://localhost:${PORT} (Vercel build output, pg -> PGlite socket)`));
 
 function serveFile(res, file) {
   res.setHeader("content-type", MIME[extname(file)] ?? "application/octet-stream");

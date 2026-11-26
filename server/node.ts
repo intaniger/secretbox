@@ -37,5 +37,5 @@ if (existsSync(`${STATIC_DIR}/index.html`)) {
 }
 
 serve({ fetch: app.fetch, port: PORT }, () => {
-  console.log(`Secretbox on http://localhost:${PORT}  (${where})`);
+  console.log(`Vault Box on http://localhost:${PORT}  (${where})`);
 });

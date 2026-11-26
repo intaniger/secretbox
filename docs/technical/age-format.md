@@ -2,7 +2,7 @@
 
 [← All documents](../README.md)
 
-Secretbox locks everything with [age v1](https://age-encryption.org/v1), through the TypeScript library [Typage](https://github.com/FiloSottile/typage). This document shows each part of an age file, with real values. The example is the data file of the note from [scenario 3](../03-add-item.md).
+Vault Box locks everything with [age v1](https://age-encryption.org/v1), through the TypeScript library [Typage](https://github.com/FiloSottile/typage). This document shows each part of an age file, with real values. The example is the data file of the note from [scenario 3](../03-add-item.md).
 
 The script [example-data.mjs](example-data.mjs) makes each value by hand with these formulas. Then it verifies that Typage unlocks each file. If a formula here were wrong, the script would fail.
 
@@ -21,10 +21,10 @@ An X25519 private key is 32 bytes. Its public key is 32 bytes too. age writes th
 
 | Key | Bech32 prefix | Example (Finance 2026 box key) | Raw bytes |
 |---|---|---|---|
-| Private key | `AGE-SECRET-KEY-` (upper case) | `AGE-SECRET-KEY-174SLE9SKATLRGWFVVQSPPZXZ2X4M0WEQM4KAEEJ09GKQHFK5FLASM7P3R3` | `f561fc9616eafe34392c60201088c251abb7bb20dd6ddce64f2a2c0ba6d44ffb` |
-| Public key | `age` | `age1aa0rtwwaz8rhsdt243382vx2x7lhf7lscfdtm6tcxhxnsqxl594sg0gwew` | `ef5e35b9dd11c778356aac627530ca37bf74fbf0c25abde97835cd3800dfa16b` |
+| Private key | `AGE-SECRET-KEY-` (upper case) | `AGE-SECRET-KEY-1Z84DDGND8UU933AKFQSVCCX66JS4UKW8A3LP56YWD3L4M06QFSJQ88KH2V` | `11ead6a26d3f3858c7b64820cc60dad4a15e59c7ec7e1a688e6c7f5dbf404c24` |
+| Public key | `age` | `age13aa297n0wgzsleu3hhsptlpjajl6a4cwyvhy3fzplhgfk0hsauqqlklqjx` | `8f7aa2fa6f72050fe791bde015fc32ecbfaed70e232e48a441fdd09b3ef0ef00` |
 
-Secretbox makes box keys and one-time keys with `age.generateX25519Identity()`. A passkey key uses the PRF output as the 32 private bytes. See [passkey-prf.md](passkey-prf.md). `age.identityToRecipient()` calculates each public key.
+Vault Box makes box keys and one-time keys with `age.generateX25519Identity()`. A passkey key uses the PRF output as the 32 private bytes. See [passkey-prf.md](passkey-prf.md). `age.identityToRecipient()` calculates each public key.
 
 ## The parts of a file
 
@@ -46,9 +46,9 @@ The data file of the note:
 
 ```
 age-encryption.org/v1
--> X25519 csC1SWy5hBxFb9OHqyOPz+hovpr0HCeFB62jnP/e5jw
-r3k3VpSGco7wucbClUEQy8YF/ZSSOZx6vERXVCEowS0
---- PWNYy+XB25dDVeCfF+Coqfq8MQ1gjkePnmadGb77IXU
+-> X25519 AD54KjOicKeazfzd1FA/xo8LMpW2jYkZxPPY2m+GUR8
+KtdBzgL4Er4NWxoo845H/GYvQNx4h8YnB49HlcF46/Y
+--- Ybz7E174I61mgtDzKu/w9B401BHoANVNRqlKya28DWQ
 <16-byte nonce><37 bytes: 21 locked bytes + 16-byte tag>
 ```
 
@@ -58,7 +58,7 @@ Total: 168 bytes of header + 53 bytes of payload = 221 bytes.
 
 ```
 file_key = 16 random bytes
-         = e6e880992a9faf8cbbfe1da538653f9f
+         = 181d2143f6842c5f890af24f31f82511
 ```
 
 The browser uses `crypto.getRandomValues`. age makes a new file key for each file. The file key never leaves the browser in the clear.
@@ -68,35 +68,35 @@ The browser uses `crypto.getRandomValues`. age makes a new file key for each fil
 Input: the file key and the recipient's public key. For an item, the recipient is the box public key.
 
 ```
-recipient       = ef5e35b9dd11c778356aac627530ca37bf74fbf0c25abde97835cd3800dfa16b   (box public key)
+recipient       = 8f7aa2fa6f72050fe791bde015fc32ecbfaed70e232e48a441fdd09b3ef0ef00   (box public key)
 
 temp_private    = 32 random bytes
-                = 75318440d7531df1bc58b287f7f6c7021a89f8aef18161b1e19974aa0e5fdd00
+                = 270f2f3260cbc0a7cc057e24b7bc84c24a004dab194726710e491b97c618d9a6
 temp_public     = X25519(temp_private, basepoint)
-                = csC1SWy5hBxFb9OHqyOPz+hovpr0HCeFB62jnP/e5jw   (base64, in the stanza line)
+                = AD54KjOicKeazfzd1FA/xo8LMpW2jYkZxPPY2m+GUR8   (base64, in the stanza line)
 
 shared_secret   = X25519(temp_private, recipient)
-                = 9ed9b3e7a706e85a4bd38782bcc9e163f51f4b36b5a399f7c90c8cd69f748941
+                = af7cc562dd4215b2bf245518c329c01e2d6427032e87ae7fdfadcb13d7f17b15
 
 salt            = temp_public || recipient          (64 bytes)
 wrap_key        = HKDF-SHA-256(ikm = shared_secret, salt = salt,
                                info = "age-encryption.org/v1/X25519", length = 32)
-                = 7abc12d3c0efe15a771e3f6a35e836a64679b87f270cc242a114c8031099d173
+                = 727033c3be92eef84d50f5bec3f8784500c3a340b71437f20d859b759e429585
 
 body            = ChaCha20-Poly1305(key = wrap_key, nonce = 12 zero bytes).seal(file_key)
-                = r3k3VpSGco7wucbClUEQy8YF/ZSSOZx6vERXVCEowS0   (32 bytes: 16 locked + 16 tag)
+                = KtdBzgL4Er4NWxoo845H/GYvQNx4h8YnB49HlcF46/Y   (32 bytes: 16 locked + 16 tag)
 ```
 
 The stanza is two lines:
 
 ```
--> X25519 csC1SWy5hBxFb9OHqyOPz+hovpr0HCeFB62jnP/e5jw
-r3k3VpSGco7wucbClUEQy8YF/ZSSOZx6vERXVCEowS0
+-> X25519 AD54KjOicKeazfzd1FA/xo8LMpW2jYkZxPPY2m+GUR8
+KtdBzgL4Er4NWxoo845H/GYvQNx4h8YnB49HlcF46/Y
 ```
 
 age forgets `temp_private` after this step. A zero nonce is safe here, because each `wrap_key` locks one value only.
 
-The stanza does not hold the recipient public key. So a person who has the file cannot see which public key locked it. Secretbox uses this: the server cannot know a member's passkey public key from their envelope.
+The stanza does not hold the recipient public key. So a person who has the file cannot see which public key locked it. Vault Box uses this: the server cannot know a member's passkey public key from their envelope.
 
 ### Unlock the stanza
 
@@ -114,11 +114,11 @@ If the private key is wrong, the Poly1305 tag check fails, and the unlock stops 
 
 ```
 mac_key = HKDF-SHA-256(ikm = file_key, salt = empty, info = "header", length = 32)
-        = 33fce5a30f50df2bba8cba014ef5a83deb1ee4332b3ccfd2bb896d6b67b5253d
+        = 64fe47e035af8b17338507487601b36a19164a67c458636ac4dd994b2a669503
 
 message = the header text from "age-encryption.org/v1" up to and including "---"
 mac     = HMAC-SHA-256(mac_key, message)
-        = PWNYy+XB25dDVeCfF+Coqfq8MQ1gjkePnmadGb77IXU   (base64)
+        = Ybz7E174I61mgtDzKu/w9B401BHoANVNRqlKya28DWQ   (base64)
 ```
 
 The last header line is `--- ` and the MAC. When the library unlocks the file, it calculates the MAC again. If a person changed a stanza, the MAC does not agree, and the library stops.
@@ -127,9 +127,9 @@ The last header line is `--- ` and the MAC. When the library unlocks the file, i
 
 ```
 payload_nonce = 16 random bytes
-              = 70821bbbf211a4ff2bcb692ae6b5d453
+              = f00dc556ab7e9a0b34ed6f3245bdbc6b
 payload_key   = HKDF-SHA-256(ikm = file_key, salt = payload_nonce, info = "payload", length = 32)
-              = 92f2c509e44e6fb6965a543616083cf5c9f4e0797e83f452fbac9bcf0d21003a
+              = 1b14184454168d49690e52d9b6346c1851f400819658d4e35c70f134d7468199
 ```
 
 The library cuts the data into chunks of 64 KiB. The last chunk can be smaller. The library locks each chunk separately:
@@ -138,14 +138,14 @@ The library cuts the data into chunks of 64 KiB. The last chunk can be smaller. 
 chunk_nonce = 11-byte chunk counter (big endian, from 0) || 1 byte last-chunk flag (0x01 or 0x00)
             = 000000000000000000000001        (chunk 0, and it is the last chunk)
 chunk       = ChaCha20-Poly1305(payload_key, chunk_nonce).seal("Salary sheet: Nok 50k")
-            = f563108d5ee6a175f0ff30a8f25f9efc7252c39e83849a15f4ada632eb58c673c485115014
+            = e8a5f50a4bc0804f36ea07b86d69c921ddd365113bc83fd6cd5ccc9743af949035a13ce231
 ```
 
 The counter stops a person who changes the order of chunks. The last-chunk flag stops a person who cuts chunks from the end.
 
 Size: 16 (nonce) + 21 (data) + 16 (tag) = 53 bytes.
 
-## How Secretbox uses the format
+## How Vault Box uses the format
 
 Each file has one X25519 stanza.
 
@@ -159,7 +159,7 @@ Each file has one X25519 stanza.
 | Invite file | The one-time public key | `{"boxKey", "name", "invitedBy"}` as JSON |
 | Invite name file | The box public key | `{"name", "invitedBy"}` as JSON |
 
-age can put many stanzas in one file, one for each recipient. Secretbox does not do this. It locks data to the box key, and gives each member the box private key in their own envelope. So a new member needs only one new envelope, and no item changes.
+age can put many stanzas in one file, one for each recipient. Vault Box does not do this. It locks data to the box key, and gives each member the box private key in their own envelope. So a new member needs only one new envelope, and no item changes.
 
 ## Verify the values yourself
 

@@ -1,5 +1,5 @@
 {
-  "name": "secretbox",
+  "name": "vault-box",
   "version": "0.1.0",
   "description": "PoC: share confidential data with one-time invite links. Readers unlock it with a passkey (WebAuthn PRF + age).",
   "scripts": {

@@ -4,15 +4,15 @@
 
 ## In short
 
-Tiger comes back the next day. He selects **Open a box with passkey**. His phone shows his passkeys, one for each box. He selects "Finance 2026 – Tiger" and uses Face ID. The box opens.
+Tiger comes back the next day. He selects **Open a box with passkey**. His phone shows his passkeys, one for each box. He selects "Finance 2026" and uses Face ID. The box opens.
 
 There is no sign-in. The passkey does not talk to the server. It only gives the key that unlocks Tiger's envelope.
 
 ## What Tiger sees
 
-1. Open Secretbox.
+1. Open Vault Box.
 2. Select **Open a box with passkey**.
-3. The phone shows a list: "Finance 2026 – Tiger", "HR 2027 – Tiger". Select "Finance 2026 – Tiger".
+3. The phone shows a list: "Finance 2026", "HR 2027". Select "Finance 2026".
 4. Confirm with Face ID.
 5. The box "Finance 2026" opens on the **Items** tab. The members are on the **People** tab.
 
@@ -36,8 +36,8 @@ sequenceDiagram
   participant S as Server
   T->>B: Open a box with passkey
   B->>P: O1. Use a passkey of this site. PRF input
-  P->>T: List: Finance 2026 – Tiger, HR 2027 – Tiger
-  T->>P: Select Finance 2026 – Tiger, Face ID
+  P->>T: List: Finance 2026, HR 2027
+  T->>P: Select Finance 2026, Face ID
   P-->>B: Credential ID, user ID (box ID), PRF output
   Note over B: O2. Passkey key
   B->>S: O3. GET /api/boxes/BOX_ID/envelopes/CREDENTIAL_ID
@@ -69,11 +69,11 @@ flowchart TD
 
 | Step | Input | Method | Output | Goes to |
 |---|---|---|---|---|
-| O1. Use a passkey | The PRF input `secretbox passkey key v1`. No list of passkeys: the phone shows all passkeys of the site. | WebAuthn `navigator.credentials.get` with the PRF extension. Tiger selects a passkey and uses Face ID. | Credential ID `jnx3yrksw0nZ_pk2v1xPmQ`. User ID `Ze3WdI5DdSbboy05-E6vhQ`. PRF output `102c876b3d31d206…` | O2, O3 |
-| O2. Passkey key | The PRF output (O1). | The same as step C4 in [scenario 1](01-create-box.md). | Passkey private key `AGE-SECRET-KEY-1ZQKGW6EAX8…`. It is the same key as in scenario 1, because the passkey and the input are the same. | O4 |
+| O1. Use a passkey | The PRF input `secretbox passkey key v1`. No list of passkeys: the phone shows all passkeys of the site. | WebAuthn `navigator.credentials.get` with the PRF extension. Tiger selects a passkey and uses Face ID. | Credential ID `BB-I_WwmhQyoq3USEVPrvA`. User ID `nbtYKFvPJE6MnspnIVuu4Q`. PRF output `9fcc080d2bd5d392…` | O2, O3 |
+| O2. Passkey key | The PRF output (O1). | The same as step C4 in [scenario 1](01-create-box.md). | Passkey private key `AGE-SECRET-KEY-1NLXQSRFT6H…`. It is the same key as in scenario 1, because the passkey and the input are the same. | O4 |
 | O3. Get the envelope | The box ID and the credential ID (O1). | `GET /api/boxes/:id/envelopes/:credentialId`. This request needs no access key. | Tiger's envelope, 274 bytes. | O4 |
-| O4. Unlock the envelope | The envelope (O3). The passkey private key (O2). | The age recipe backwards: X25519 with the temporary public part `J4i8VohRwgZc7yBo…` gives the shared secret `fc792fcf55a406d4…`. HKDF-SHA-256 gives the wrap key `7893469b188bafd6…`. ChaCha20-Poly1305 unlocks the file key `11de376a…`. Then the header check and the payload. | Box private key `AGE-SECRET-KEY-174SLE9SKAT…` | O5, O7. It stays in tab memory. |
-| O5. Access key | The box private key (O4). | HMAC-SHA-256 with the text `secretbox access key v1`, as in step C6. | `w12HnRha1TekeupnN6JmZUsjz5UVc44WckyrUY8nt60`. The same value as in scenario 1. | O6 |
+| O4. Unlock the envelope | The envelope (O3). The passkey private key (O2). | The age recipe backwards: X25519 with the temporary public part `GiOSDxXQXStQbk9I…` gives the shared secret `37a1bb8e7b86476d…`. HKDF-SHA-256 gives the wrap key `be7f72ee0358b8ca…`. ChaCha20-Poly1305 unlocks the file key `e8098c57…`. Then the header check and the payload. | Box private key `AGE-SECRET-KEY-1Z84DDGND8U…` | O5, O7. It stays in tab memory. |
+| O5. Access key | The box private key (O4). | HMAC-SHA-256 with the text `secretbox access key v1`, as in step C6. | `-opAqacwlYsMBtzqm8OLNy6fM6xa3MBHIPav8AuUxBI`. The same value as in scenario 1. | O6 |
 | O6. Get the box | The box ID. The access key (O5). | `GET /api/boxes/:id` with `Authorization: Bearer` and the access key. The server calculates SHA-256 of the key and looks for a box with that ID and that hash. | The box public key, the box name file, the member name files, the item labels and the open invites. | O7 |
 | O7. Check and unlock | The answer (O6). The box private key (O4). | The browser calculates the public key from the box private key. It must be the same as the box public key from the server. Then the box private key unlocks each name file and label. | "Finance 2026". The members and the items. | The screen |
 
@@ -95,7 +95,7 @@ Then the box page shows "This box is locked" and **Open with passkey**. One Face
 
 ## If the passkey was removed
 
-A member can remove Tiger. Then the server deletes his envelope. At step O3, the server answers "This passkey does not open this box". Tiger's passkey stays on his phone, but it opens nothing. See [flaw 2](08-security.md#2-removal-deletes-only-the-envelope).
+A member can remove Tiger. Then the server deletes his envelope. At step O3, the server answers "This passkey can't open this box anymore". Tiger's passkey stays on his phone, but it opens nothing. See [flaw 2](08-security.md#2-removal-deletes-only-the-envelope).
 
 ## Result
 
