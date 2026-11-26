@@ -37,6 +37,7 @@ const ICONS = {
   copy: "M9 9h11v11H9z|M5 15H4V4h11v1",
   check: "M20 6L9 17l-5-5",
   share: "M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8|M16 6l-4-4-4 4|M12 2v13",
+  userPlus: "M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2|M12.5 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0z|M20 8v6|M23 11h-6",
   plug: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71|M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71",
 } as const;
 
@@ -96,8 +97,8 @@ function form(props: Props, onSubmit: () => void, ...children: Child[]) {
   return h("form", { ...props, onsubmit: (e: Event) => { e.preventDefault(); onSubmit(); } }, ...children);
 }
 
-function copyButton(text: string, label = "Copy") {
-  const b = h("button", {}, icon("copy"), label);
+function copyButton(text: string, label = "Copy", props: Props = {}) {
+  const b = h("button", props, icon("copy"), label);
   b.onclick = async () => {
     try {
       await navigator.clipboard.writeText(text);
@@ -128,15 +129,19 @@ const fmtIn = (t: number) => {
   return rtf.format(Math.round(min / 1440), "day");
 };
 const hasExt = (name: string) => /\.\w{1,8}$/.test(name);
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * A name as the person looking at it reads it, for use inside a sentence.
+ * Nobody names the person who makes a box, so an empty name is the box creator.
+ */
+function who(name: string, me: vault.Person): string {
+  if (name === me.name) return "you";
+  return name || "the box creator";
+}
 
 // ---------------------------------------------------------------------------
 // Router
-
-/**
- * The invite link that was just made. It holds a one-time private key, so it
- * lives only in memory and is dropped on the next navigation.
- */
-let freshInvite: { boxId: string; name: string; url: string } | null = null;
 
 function go(path: string) {
   history.pushState(null, "", path);
@@ -148,12 +153,13 @@ window.addEventListener("popstate", () => void render());
 const pathBoxId = () => location.pathname.match(/^\/box\/([\w-]+)/)?.[1] ?? null;
 
 async function render() {
-  freshInvite = null;
+  // A dialog (it may hold a fresh invite link) never outlives its page.
+  document.querySelectorAll("dialog").forEach((d) => d.remove());
   const path = location.pathname;
   let m: RegExpMatchArray | null;
   try {
     if ((m = path.match(/^\/join\/([\w-]+)$/))) return await joinView(m[1]);
-    if ((m = path.match(/^\/box\/([\w-]+)(\/people)?$/))) return await boxView(m[1], m[2] ? "people" : "items");
+    if ((m = path.match(/^\/box\/([\w-]+)(?:\/(people|integration))?$/))) return await boxView(m[1], (m[2] as Tab | undefined) ?? "items");
     return await homeView();
   } catch (err) {
     console.error(err);
@@ -166,24 +172,22 @@ const link = (path: string) => (e: Event) => {
   go(path);
 };
 
+/**
+ * The brand, and one Lock button while a box is open. Seeing the box's
+ * contents already says it is unlocked, so there is no separate status.
+ */
 function topbar(open?: vault.Box) {
   return h(
     "header",
     { class: "topbar" },
-    h("a", { class: "brand", href: "/", onclick: link("/") }, icon("box"), "Secretbox"),
-    location.pathname.startsWith("/box/") &&
-      h(
-        "div",
-        { class: "who" },
-        h("span", {
-          class: `lockstate ${open ? "ok" : ""}`,
-          title: open
-            ? "This box is open in this tab until you select Lock or close the tab."
-            : "Open this box with its passkey.",
-        }, icon(open ? "unlock" : "lock"), h("span", { "data-test": "lock-state" }, open ? "Unlocked" : "Locked")),
-        open && h("span", { class: "muted name" }, open.me.name),
-        open && h("button", { class: "link", "data-test": "lock", onclick: () => { vault.lock(); go("/"); } }, "Lock"),
-      ),
+    h("a", { class: "brand", href: "/", onclick: link("/") }, icon("box"), "Vault Box"),
+    open &&
+      h("button", {
+        class: "lock-button",
+        "data-test": "lock",
+        title: "Lock this box in this tab. Your passkey opens it again.",
+        onclick: () => { vault.lock(); go("/"); },
+      }, icon("lock"), "Lock"),
   );
 }
 
@@ -208,18 +212,15 @@ async function homeView() {
   const openId = vault.openBoxId();
   const openName = openId ? await vault.load().then((b) => b.name, () => null) : null;
 
-  const nick = h("input", { placeholder: "e.g. Tiger", autocomplete: "nickname", "data-test": "nickname" });
-  const boxName = h("input", { placeholder: "e.g. Finance 2026", "data-test": "box-name" });
-  const createBtn = h("button", { type: "submit", class: "block", "data-test": "create-box" }, "Create box");
+  const boxName = h("input", { placeholder: "Box name, e.g. Finance 2026", "aria-label": "Box name", "data-test": "box-name" });
+  const createBtn = h("button", { type: "submit", "data-test": "create-box" }, "Create box");
   const create = form({ class: "card" }, () =>
     act(createBtn, "Make the passkey for this box…", async () => {
-      if (!nick.value.trim() || !boxName.value.trim()) throw Error("Type your name and a box name.");
-      go(`/box/${await vault.createBox(boxName.value.trim(), nick.value.trim())}`);
+      if (!boxName.value.trim()) throw Error("Type a name for the box.");
+      go(`/box/${await vault.createBox(boxName.value.trim())}`);
     }),
     h("h2", {}, "Make a new box"),
-    h("label", {}, "Your name", nick),
-    h("label", {}, "Box name", boxName),
-    createBtn,
+    h("div", { class: "inline-form" }, boxName, createBtn),
     h("p", { class: "hint" }, "Your device makes a passkey for this box. There is no account and no email."),
   );
 
@@ -245,8 +246,10 @@ async function homeView() {
 // ---------------------------------------------------------------------------
 // Box
 
-type Tab = "items" | "people";
+type Tab = "items" | "people" | "integration";
 type BoxCtx = { d: vault.Box; refresh: () => Promise<void> };
+
+const tabPath = (boxId: string, tab: Tab) => `/box/${boxId}${tab === "items" ? "" : `/${tab}`}`;
 
 async function boxView(boxId: string, tab: Tab) {
   if (vault.openBoxId() !== boxId) {
@@ -270,25 +273,30 @@ async function boxView(boxId: string, tab: Tab) {
     }
     throw err;
   }
+  // A refresh that finishes after the person went to another page must not draw over it.
+  if (location.pathname !== tabPath(boxId, tab)) return;
   const ctx: BoxCtx = { d, refresh: () => boxView(boxId, tab) };
 
-  const base = `/box/${boxId}`;
-  const tabLink = (t: Tab, label: string, n: number) => {
-    const href = t === "items" ? base : `${base}/people`;
+  const tabLink = (t: Tab, label: string, badge: string | number | null) => {
+    const href = tabPath(boxId, t);
     return h("a", { class: "tab", href, onclick: link(href), "aria-current": t === tab ? "page" : undefined, "data-test": `tab-${t}` },
-      label, h("span", { class: "count" }, String(n)));
+      label, badge !== null && h("span", { class: "count" }, String(badge)));
   };
 
   show(
     topbar(d),
     h("section", { class: "boxhead" },
-      h("h1", { "data-test": "box-title" }, d.name),
+      h("div", { class: "boxhead-row" },
+        h("h1", { "data-test": "box-title" }, d.name),
+        shareButton(ctx, "Share", { class: "primary", "data-test": "share" }),
+      ),
       h("nav", { class: "tabs", "aria-label": "Box sections" },
         tabLink("items", "Items", d.items.length),
         tabLink("people", "People", d.members.length),
+        tabLink("integration", "Integration", d.hasAddKey ? "On" : null),
       ),
     ),
-    ...(tab === "items" ? itemsTab(ctx) : peopleTab(ctx)),
+    ...(tab === "items" ? itemsTab(ctx) : tab === "people" ? peopleTab(ctx) : integrationTab(ctx)),
   );
 }
 
@@ -301,7 +309,6 @@ function itemsTab(ctx: BoxCtx): Child[] {
     d.items.length
       ? h("ul", { class: "items", "data-test": "items" }, ...d.items.map((it) => itemRow(ctx, it)))
       : h("p", { class: "empty" }, "Nothing here yet. Add a note or upload a file."),
-    connectSection(ctx),
   ];
 }
 
@@ -357,9 +364,9 @@ function addTools({ d, refresh }: BoxCtx): Child[] {
   ];
 }
 
-function itemRow({ refresh }: BoxCtx, it: vault.Box["items"][number]) {
+function itemRow({ d, refresh }: BoxCtx, it: vault.Box["items"][number]) {
   const name = it.label?.name ?? "From an outside system";
-  const by = it.label ? it.label.addedBy : "outside system";
+  const by = it.label ? who(it.label.addedBy, d.me) : "outside system";
   const isText = it.label ? it.label.type.startsWith("text/") || !hasExt(it.label.name) : false;
   const viewer = h("div", { class: "viewer", hidden: true });
   const row = h("button", { class: "item", "data-test": "open-item", "aria-expanded": "false" },
@@ -413,7 +420,9 @@ function itemRow({ refresh }: BoxCtx, it: vault.Box["items"][number]) {
   return h("li", {}, row, viewer);
 }
 
-function connectSection({ d, refresh }: BoxCtx) {
+// --- Integration tab
+
+function integrationTab({ d, refresh }: BoxCtx): Child[] {
   const out = h("div", {});
   const makeBtn = h("button", { "data-test": "create-token" }, d.hasAddKey ? "Replace add key" : "Make add key");
   makeBtn.onclick = () => act(makeBtn, "Making add key…", async () => {
@@ -433,15 +442,19 @@ function connectSection({ d, refresh }: BoxCtx) {
     await refresh();
   });
 
-  return h("details", { class: "card disclosure", "data-test": "connect" },
-    h("summary", {}, icon("plug"), h("span", { class: "grow" }, "Let a form or script add items"), icon("chevron", "icon chev")),
-    h("p", { class: "muted small" }, "An outside system can add items with the box public key and an add key. It can't read anything."),
-    h("div", { class: "label" }, "Box public key"),
-    h("pre", { "data-test": "box-recipient" }, d.publicKey),
-    h("p", { class: "small muted" }, d.hasAddKey ? "An add key is turned on." : "There is no add key yet."),
-    h("div", { class: "buttons" }, makeBtn, offBtn),
-    out,
-  );
+  return [
+    h("section", { class: "card", "data-test": "connect" },
+      h("h2", {}, "Let a form or script add items"),
+      h("p", { class: "muted small" }, "An outside system can add items with the box public key and an add key. It can't read anything."),
+      h("div", { class: "label" }, "Box public key"),
+      h("pre", { "data-test": "box-recipient" }, d.publicKey),
+      h("div", { class: "buttons" }, copyButton(d.publicKey, "Copy public key")),
+      h("div", { class: "label spaced" }, "Add key"),
+      h("p", { class: "small" }, d.hasAddKey ? "On. An outside system with the add key can add items." : "Off. There is no add key yet."),
+      h("div", { class: "buttons" }, makeBtn, offBtn),
+      out,
+    ),
+  ];
 }
 
 // --- People tab
@@ -450,91 +463,140 @@ function peopleTab(ctx: BoxCtx): Child[] {
   const { d, refresh } = ctx;
   const members = h("ul", { class: "list", "data-test": "members" },
     ...d.members.map((m) => {
+      // The box creator has no name: they are "You" to themselves.
+      const title = m.name || (m.isMe ? "You" : "Box creator");
+      const them = m.name || "the box creator";
       const rm = !m.isMe && h("button", { class: "link danger", "data-test": `remove-${m.name}` }, "Remove");
       if (rm) rm.onclick = () => act(rm, "Removing…", async () => {
-        if (!confirm(`Remove ${m.name}? Their passkey stops opening this box. If they copied the box key, they keep it: to cut someone off fully, make a new box.`)) return;
+        if (!confirm(`Remove ${them}? Their passkey stops opening this box. If they copied the box key, they keep it: to cut someone off fully, make a new box.`)) return;
         await vault.removeMember(m.credentialId);
         await refresh();
-        say(`${m.name} was removed.`, "ok");
+        say(`${cap(them)} was removed.`, "ok");
       });
       return h("li", { class: "person", "data-test": "member" },
-        h("span", { class: "avatar", "aria-hidden": "true" }, m.name.trim().charAt(0).toUpperCase() || "?"),
+        h("span", { class: "avatar", "aria-hidden": "true" }, title.trim().charAt(0).toUpperCase() || "?"),
         h("span", { class: "grow" },
-          h("span", { class: "line" }, h("span", { class: "row-main" }, m.name), m.isMe && h("span", { class: "muted" }, " (you)")),
+          h("span", { class: "line" }, h("span", { class: "row-main" }, title), m.isMe && m.name && h("span", { class: "muted" }, " (you)")),
           h("span", { class: "meta", title: fmtDate(m.createdAt) },
-            `${m.invitedBy ? `Invited by ${m.invitedBy}` : "Made this box"} · ${fmtDay(m.createdAt)}`),
+            `${m.invitedBy === null ? "Made this box" : `Invited by ${who(m.invitedBy, d.me)}`} · ${fmtDay(m.createdAt)}`),
         ),
         rm,
       );
     }),
   );
 
+  const pending = d.invites.length > 0 && h("section", { class: "card" },
+    h("h2", {}, "Waiting to be used"),
+    h("ul", { class: "list", "data-test": "invites" },
+      ...d.invites.map((i) => {
+        const cancel = h("button", { class: "link danger", "data-test": `cancel-${i.name}` }, "Cancel");
+        cancel.onclick = () => act(cancel, "Canceling…", async () => {
+          await vault.cancelInvite(i.id);
+          await refresh();
+        });
+        return h("li", { class: "row" },
+          h("span", {},
+            h("span", { class: "row-main" }, i.name),
+            h("span", { class: "meta", title: fmtDate(i.expiresAt) }, `Invited by ${who(i.invitedBy ?? "", d.me)} · expires ${fmtIn(i.expiresAt)}`)),
+          cancel,
+        );
+      }),
+    ),
+  );
+
   return [
-    inviteCard(ctx),
-    h("section", { class: "card" }, h("h2", {}, "People with access"), members),
+    h("section", { class: "card" },
+      h("h2", {}, "People with access"),
+      members,
+      h("div", { class: "card-foot" }, shareButton(ctx, "Invite someone", { class: "link", "data-test": "invite" })),
+    ),
+    pending,
   ];
 }
 
-function inviteCard({ d, refresh }: BoxCtx) {
-  const name = h("input", { placeholder: "Their name, e.g. Nok", autocomplete: "off", "aria-label": "Their name", "data-test": "invite-name" });
-  const ttl = h("select", { "aria-label": "Link works for" },
+// --- Share: invite one person
+
+function shareButton(ctx: BoxCtx, label: string, props: Props) {
+  const b = h("button", props, icon("userPlus"), label);
+  b.onclick = () => shareDialog(ctx);
+  return b;
+}
+
+/**
+ * Sharing a box = inviting one person: type their name, get a one-time link.
+ * The link holds a one-time private key, so it is shown only in this dialog,
+ * and it is gone when the dialog closes.
+ */
+function shareDialog({ d, refresh }: BoxCtx) {
+  const dialog = h("dialog", { class: "sheet", "aria-labelledby": "share-title", "data-test": "share-dialog" });
+  dialog.addEventListener("close", () => dialog.remove());
+  // The content fills the dialog, so a click on the dialog itself is on the
+  // backdrop. That closes it only before the link exists: a stray tap must not
+  // throw away a link that is shown just this once (Done or Esc still close).
+  dialog.addEventListener("click", (e) => {
+    if (e.target === dialog && ask.isConnected) dialog.close();
+  });
+
+  const name = h("input", { placeholder: "e.g. Nok", autocomplete: "off", "data-test": "invite-name" });
+  const ttl = h("select", {},
     h("option", { value: "1" }, "1 hour"), h("option", { value: "24", selected: true }, "24 hours"),
     h("option", { value: "72" }, "3 days"), h("option", { value: "168" }, "7 days"));
-  const summary = h("span", {});
-  const sync = () => (summary.textContent = `The link works for ${ttl.selectedOptions[0]?.textContent}`);
-  ttl.addEventListener("change", sync);
-  sync();
+  const error = h("p", { class: "error small", role: "alert", hidden: true });
+  const create = h("button", { type: "submit", class: "primary", "data-test": "create-invite" }, "Create link");
+  const fail = (message: string) => {
+    error.textContent = message;
+    error.hidden = false;
+  };
 
-  const btn = h("button", { type: "submit", class: "primary", "data-test": "create-invite" }, "Create link");
-  const create = form({ class: "inline-form" }, () =>
-    act(btn, "Making the invite link…", async () => {
-      if (!name.value.trim()) throw Error("Type the name of the person you invite.");
-      const url = await vault.createInvite(d, name.value.trim(), Number(ttl.value));
-      freshInvite = { boxId: d.id, name: name.value.trim(), url };
-      await refresh();
-    }), name, btn);
-
-  // Show the new link only while it can still be used: after it is canceled
-  // (or opened), its row is gone and the link is dead.
-  const freshId = freshInvite && new URL(freshInvite.url).pathname.split("/").pop();
-  const fresh = freshInvite?.boxId === d.id && d.invites.some((i) => i.id === freshId) ? freshInvite : null;
-  if (!fresh) freshInvite = null;
-  const share = fresh && "share" in navigator && h("button", {}, icon("share"), "Share");
-  if (share && fresh) share.onclick = () => navigator.share({ url: fresh.url }).catch(() => {});
-
-  const pending = d.invites.length > 0 && h("ul", { class: "list", "data-test": "invites" },
-    ...d.invites.map((i) => {
-      const cancel = h("button", { class: "link danger", "data-test": `cancel-${i.name}` }, "Cancel");
-      cancel.onclick = () => act(cancel, "Canceling…", async () => {
-        await vault.cancelInvite(i.id);
-        await refresh();
-      });
-      return h("li", { class: "row" },
-        h("span", {},
-          h("span", { class: "row-main" }, i.name),
-          h("span", { class: "meta", title: fmtDate(i.expiresAt) }, `invited by ${i.invitedBy} · expires ${fmtIn(i.expiresAt)}`)),
-        cancel,
-      );
-    }),
+  const ask = form({ class: "sheet-body" }, async () => {
+    const them = name.value.trim();
+    error.hidden = true;
+    if (!them) {
+      fail("Type the name of the person you share with.");
+      return name.focus();
+    }
+    create.disabled = true;
+    try {
+      const url = await vault.createInvite(d, them, Number(ttl.value));
+      // Update the page behind the dialog now (the new invite shows under
+      // "Waiting to be used"), so closing the dialog changes nothing under the
+      // pointer. If that fails, still show the link: the invite exists.
+      await refresh().catch(console.error);
+      dialog.replaceChildren(linkReady(them, url));
+    } catch (err) {
+      console.error(err);
+      fail(explain(err));
+    } finally {
+      create.disabled = false;
+    }
+  },
+    h("h2", { id: "share-title" }, `Share “${d.name}”`),
+    h("p", { class: "muted small" }, "Make a one-time link for one person. The name is how they appear in this box."),
+    h("label", {}, "Their name", name),
+    h("label", {}, "Link works for", ttl),
+    error,
+    h("div", { class: "buttons end" }, h("button", { onclick: () => dialog.close() }, "Cancel"), create),
   );
 
-  return h("section", { class: "card" },
-    h("h2", {}, "Invite someone"),
-    h("p", { class: "muted small" }, "Anyone in this box can invite. The name you type is how they appear here. Each link works one time."),
-    create,
-    h("details", { class: "options" },
-      h("summary", {}, summary, h("span", { class: "change" }, "Change")),
-      h("label", {}, "Link works for", ttl),
-    ),
-    fresh &&
-      h("div", { class: "invite-result" },
-        h("p", { class: "small" }, h("strong", {}, `The link for ${fresh.name} is ready. `), "Send it in a private chat. It works one time, and it is shown only here."),
-        h("input", { readOnly: true, value: fresh.url, "aria-label": "Invite link", "data-test": "invite-link", onfocus: (e: Event) => (e.target as HTMLInputElement).select() }),
-        h("div", { class: "buttons" }, copyButton(fresh.url, "Copy link"), share),
+  const linkReady = (them: string, url: string) => {
+    const share = "share" in navigator && h("button", {}, icon("share"), "Share…");
+    if (share) share.onclick = () => navigator.share({ url }).catch(() => {});
+    return h("div", { class: "sheet-body" },
+      h("h2", { id: "share-title" }, `The link for ${them} is ready`),
+      h("p", { class: "muted small" }, "Send it in a private chat. It works one time, and it is shown only now."),
+      h("input", { readOnly: true, value: url, "aria-label": "Invite link", "data-test": "invite-link", onfocus: (e: Event) => (e.target as HTMLInputElement).select() }),
+      h("div", { class: "buttons" },
+        copyButton(url, "Copy link", { class: "primary" }),
+        share,
+        h("button", { class: "push", "data-test": "share-done", onclick: () => dialog.close() }, "Done"),
       ),
-    pending && h("h3", {}, "Waiting to be used"),
-    pending,
-  );
+    );
+  };
+
+  dialog.append(ask);
+  document.body.append(dialog);
+  dialog.showModal();
+  name.focus();
 }
 
 // ---------------------------------------------------------------------------
@@ -574,7 +636,7 @@ async function joinView(inviteId: string) {
     });
     return card(
       h("h1", {}, "You're invited to a box"),
-      h("p", { class: "muted" }, "Somebody sent you a private link to a box in Secretbox."),
+      h("p", { class: "muted" }, "Somebody sent you a private link to a box on Vault Box."),
       openBtn,
       h("p", { class: "hint" }, "Opening the invite uses up this link, so nobody else can use it after you."),
     );
@@ -592,7 +654,8 @@ async function joinView(inviteId: string) {
       say(`You joined “${inv.boxName}”.`, "ok");
     });
   card(
-    h("h1", {}, `${inv.invitedBy} invited you to “${inv.boxName}”`),
+    // The box creator has no name; the person knows who sent them the link.
+    h("h1", {}, inv.invitedBy ? `${inv.invitedBy} invited you to “${inv.boxName}”` : `You're invited to “${inv.boxName}”`),
     h("p", { class: "muted", "data-test": "invite-as" }, `You will appear as ${inv.name} in this box.`),
     accept,
     h("p", { class: "hint" }, "Nothing to fill in, and no email. Your device makes a passkey for this box."),

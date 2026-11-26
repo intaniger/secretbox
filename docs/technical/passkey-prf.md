@@ -34,7 +34,7 @@ flowchart LR
 
 ## The input and the outputs
 
-Secretbox always uses the same input: `secretbox passkey key v1`.
+Vault Box always uses the same input: `secretbox passkey key v1`. It keeps the app's old name, Secretbox, on purpose: every passkey key comes from this input, so a new input would lock every member out.
 
 ```
 input        = "secretbox passkey key v1"
@@ -46,9 +46,9 @@ Each passkey has its own hidden secret, so each passkey gives a different output
 
 | Passkey | Hidden secret (simulated) | PRF output |
 |---|---|---|
-| Finance 2026 – Tiger | `f65b8482512addd8…` | `102c876b3d31d206f10e639306a2e8477845c7a78b9676faa1b3c2b19d739499` |
-| HR 2027 – Tiger | `247d74f9872fe2ed…` | `07137eb0500ce07eb7ab4ce642800f83c626da4db8ae5d261a0b1b6efa944d75` |
-| Finance 2026 – Nok | `a9dbe58eb2103f12…` | `e569a0f8789aec478271a2a84ac0f039af616dd9ecf61dca5b310d980358381f` |
+| Finance 2026 | `48bfb2512c851f23…` | `9fcc080d2bd5d392cd3594a199b4e12f7625e0cccc907725088556a4130c3a48` |
+| HR 2027 | `fc71468c2b7427bd…` | `1c4f3378f947bddb2ff47117a90a5b15998a1ef473c423d9f6f558dfadb211d1` |
+| Finance 2026 – Nok | `af9d63585234d300…` | `eb73d4f6f9ae7b8920a3d32f7afba16dd05ed2c6a6d653bf408724d11ffdf32f` |
 
 A real passkey never shows its hidden secret. The script [example-data.mjs](example-data.mjs) simulates it with the same formulas.
 
@@ -60,11 +60,11 @@ The 32 bytes of the PRF output are the X25519 private key. No other step is nece
 
 ```
 passkey_private = prf_output                                   (32 bytes)
-                = 102c876b3d31d206f10e639306a2e8477845c7a78b9676faa1b3c2b19d739499
+                = 9fcc080d2bd5d392cd3594a199b4e12f7625e0cccc907725088556a4130c3a48
 as text         = Bech32("AGE-SECRET-KEY-", passkey_private), upper case
-                = AGE-SECRET-KEY-1ZQKGW6EAX8FQDUGWVWFSDGHGGAUYT3A83WT8D74PK0PTR8TNJJVSPV3UMU
+                = AGE-SECRET-KEY-1NLXQSRFT6HFE9NF4JJSEND8P9AMZTCXVEJG8WFGGS4T2GYCV8FYQCGJU42
 passkey_public  = X25519(passkey_private, basepoint)
-as text         = age1l88akkymhz39h3fthp04q8ghcxt626aqjc3lztyx5s3er96x25dstpqevm
+as text         = age18wcj2lnje95fkz4cgc92vkrqqw6kw0tpcaudpkdtmx6l8pw6l3rqkk27c6
 ```
 
 In the code:
@@ -74,13 +74,13 @@ const identity = bech32.encode("AGE-SECRET-KEY-", bech32.toWords(prfOutput), fal
 const recipient = await age.identityToRecipient(identity);
 ```
 
-**Why the output can be the key directly.** An X25519 private key can be any 32 bytes. X25519 sets a few bits itself ("clamping"). The PRF output is 32 bytes from HMAC-SHA-256, so it is uniformly random for anybody without the passkey. Secretbox uses this input for this one purpose only. The `v1` in the input lets a later version make different keys.
+**Why the output can be the key directly.** An X25519 private key can be any 32 bytes. X25519 sets a few bits itself ("clamping"). The PRF output is 32 bytes from HMAC-SHA-256, so it is uniformly random for anybody without the passkey. Vault Box uses this input for this one purpose only. The `v1` in the input lets a later version make different keys.
 
 ## Make a passkey (scenarios 1 and 5)
 
 ```ts
 navigator.credentials.create({ publicKey: {
-  rp: { id: location.hostname, name: "Secretbox" },
+  rp: { id: location.hostname, name: "Vault Box" },
   user: { id: utf8(boxId), name: "Finance 2026 – Nok", displayName: "Finance 2026 – Nok" },
   challenge: randomBytes(32),
   pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -8 }, { type: "public-key", alg: -257 }],
@@ -92,7 +92,7 @@ navigator.credentials.create({ publicKey: {
 | Option | Why |
 |---|---|
 | `user.id` = the box ID | One passkey for each box. A new passkey with the same user ID replaces the old one on that device. The box ID comes back when a person uses the passkey. |
-| `user.name` = box name and person name | The phone shows it in its passkey list. See [flaw 9](../08-security.md#9-the-passkey-label-shows-the-box-name-and-the-persons-name). |
+| `user.name` = the box name, plus the person's name if they were invited | The phone shows it in its passkey list. See [flaw 9](../08-security.md#9-the-passkey-label-shows-the-box-name-and-an-invited-persons-name). |
 | `residentKey: "required"` | The passkey must be "discoverable", so the phone can list it without a credential ID from the website. |
 | `userVerification: "required"` | PRF needs Face ID, a fingerprint or a PIN. |
 | `challenge` | Random, but nobody checks it. The server does not use the passkey to sign in. |
@@ -118,15 +118,15 @@ navigator.credentials.get({ publicKey: {
 
 | Field | Example | Use |
 |---|---|---|
-| `rawId` | `jnx3yrksw0nZ_pk2v1xPmQ` (base64url) | Finds the member row: `GET /api/boxes/:id/envelopes/:credentialId` |
-| `response.userHandle` | `Ze3WdI5DdSbboy05-E6vhQ` | The box ID |
-| `prf.results.first` | `102c876b3d31d206…` | The passkey private key |
+| `rawId` | `BB-I_WwmhQyoq3USEVPrvA` (base64url) | Finds the member row: `GET /api/boxes/:id/envelopes/:credentialId` |
+| `response.userHandle` | `nbtYKFvPJE6MnspnIVuu4Q` | The box ID |
+| `prf.results.first` | `9fcc080d2bd5d392…` | The passkey private key |
 
 So one Face ID gives the box, the passkey and the key. The browser needs no list of boxes.
 
 ## Why not the fido2prf stanza
 
-The first version of Secretbox used Typage's passkey support: a `fido2prf` stanza in the envelope. That stanza uses a new random nonce for each file, and the nonce is part of the PRF input. So the browser must have the file, and know the passkey, **before** it asks for Face ID.
+The first version of Vault Box used Typage's passkey support: a `fido2prf` stanza in the envelope. That stanza uses a new random nonce for each file, and the nonce is part of the PRF input. So the browser must have the file, and know the passkey, **before** it asks for Face ID.
 
 Without accounts, the browser does not know the box before the person selects a passkey. With the `fido2prf` stanza, it would need two Face IDs: one to find the passkey, and one for the PRF output. Or each device would need a list of passkeys.
 

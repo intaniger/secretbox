@@ -4,11 +4,11 @@
 
 ## In short
 
-Secretbox protects data against people who **keep** the data: the database, its backups, and the hosting companies. They get only locked files and hashes.
+Vault Box protects data against people who **keep** the data: the database, its backups, and the hosting companies. They get only locked files and hashes.
 
-Secretbox does **not** fully protect data against people who **control the server code**. The server sends the page that unlocks the data. A changed page can steal keys.
+Vault Box does **not** fully protect data against people who **control the server code**. The server sends the page that unlocks the data. A changed page can steal keys.
 
-Secretbox has no accounts. A person is a member because they have the box private key. This makes the system simple, but it also means that **nobody can take the box private key back** from a person who had it.
+Vault Box has no accounts. A person is a member because they have the box private key. This makes the system simple, but it also means that **nobody can take the box private key back** from a person who had it.
 
 This document lists each known flaw. Each flaw has a level:
 
@@ -28,7 +28,7 @@ This document lists each known flaw. Each flaw has a level:
 | 6 | Every member can do everything | Medium | Design choice |
 | 7 | X25519 is not safe against future quantum computers | Medium | A fix is possible. |
 | 8 | Sizes, times and counts are not locked | Low | Design limit |
-| 9 | The passkey label shows the box name and the person's name | Low | Design choice |
+| 9 | The passkey label shows the box name and an invited person's name | Low | Design choice |
 | 10 | An opened invite is lost if the tab closes | Low | Design limit |
 | 11 | A lost passkey means lost access | Low | A member can send a new link. |
 | 12 | No rate limits, no audit log | Low | Not built yet |
@@ -137,7 +137,7 @@ This is a deliberate choice. Encryption cannot make a member "read only": each m
 
 ## 7. X25519 is not safe against future quantum computers
 
-**What:** A large quantum computer could break X25519 in the future. All age files in Secretbox use X25519: envelopes, items, names and invite files.
+**What:** A large quantum computer could break X25519 in the future. All age files in Vault Box use X25519: envelopes, items, names and invite files.
 
 **Who can use it:** A person who copies the database now and keeps it for many years.
 
@@ -155,13 +155,13 @@ This is a deliberate choice. Encryption cannot make a member "read only": each m
 
 **Fix:** Add random padding to items. This makes sizes less exact.
 
-## 9. The passkey label shows the box name and the person's name
+## 9. The passkey label shows the box name and an invited person's name
 
-**What:** The phone saves each passkey with a label, for example "Finance 2026 – Nok". The password manager keeps it in clear text, and Apple or Google syncs it.
+**What:** The phone saves each passkey with a label, for example "Finance 2026 – Nok". The person who made the box gets only the box name, "Finance 2026". The password manager keeps it in clear text, and Apple or Google syncs it.
 
 **Who can use it:** A person who can look at the phone's password list. The password manager company.
 
-**Effect:** They see the box names and the person's name. They cannot open the box without Face ID.
+**Effect:** They see the box names, and the names of invited people. They cannot open the box without Face ID.
 
 **Fix:** Use a neutral label. But then the passkey list is harder to use.
 
@@ -212,7 +212,7 @@ This is a deliberate choice. Encryption cannot make a member "read only": each m
 | The server could give a wrong public key. | The browser checks the box public key against the box private key. The server cannot make a false envelope, because it never gets a passkey public key. |
 | A stolen member key also opened future key copies. | There are no member keys and no key copies. |
 
-## What Secretbox does protect
+## What Vault Box does protect
 
 | Threat | Protected? |
 |---|---|

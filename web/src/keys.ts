@@ -42,6 +42,8 @@ function secretOf(identity: string): Uint8Array {
  * The box's access key: HMAC-SHA-256(box private key, "secretbox access key v1").
  * Only someone with the box private key can make it. The server stores its
  * SHA-256 hash and asks for it on every member request.
+ * The text is frozen: it keeps the app's old name (Secretbox), and every
+ * existing box's access hash depends on it.
  */
 export async function accessKey(boxIdentity: string): Promise<string> {
   const key = await crypto.subtle.importKey(

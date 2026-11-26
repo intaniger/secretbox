@@ -2,7 +2,7 @@
 
 [← All documents](../README.md)
 
-Secretbox has no accounts, no sign-in, no sessions and no cookies. This document shows what replaces them.
+Vault Box has no accounts, no sign-in, no sessions and no cookies. This document shows what replaces them.
 
 | Question | Answer |
 |---|---|
@@ -15,7 +15,7 @@ Secretbox has no accounts, no sign-in, no sessions and no cookies. This document
 
 A passkey works only on the domain where the person made it (the "RP ID"). The browser uses `location.hostname`. So:
 
-- A passkey made on `secretbox-nu.vercel.app` does not work on a preview URL or on a custom domain.
+- A passkey made on `vlt.i7r.tech` does not work on a preview URL or on any other domain.
 - Choose the final domain before real members join.
 
 The server does not check the domain, because it does not check passkeys.
@@ -27,12 +27,14 @@ access_key  = base64url( HMAC-SHA-256(key = box_private_key_bytes, message = "se
 access_hash = hex( SHA-256(access_key as text) )
 ```
 
+The text `secretbox access key v1` keeps the app's old name, Secretbox, on purpose. Every box's access hash depends on it, so it can't change.
+
 With the Finance 2026 values:
 
 ```
-box_private_key_bytes = f561fc9616eafe34392c60201088c251abb7bb20dd6ddce64f2a2c0ba6d44ffb
-access_key            = w12HnRha1TekeupnN6JmZUsjz5UVc44WckyrUY8nt60
-access_hash           = 753a4c5b86ec246133c2825035d31b23274e4f4a9098a1de24d2b967512b95af       ← the server keeps only this
+box_private_key_bytes = 11ead6a26d3f3858c7b64820cc60dad4a15e59c7ec7e1a688e6c7f5dbf404c24
+access_key            = -opAqacwlYsMBtzqm8OLNy6fM6xa3MBHIPav8AuUxBI
+access_hash           = 1ee2b4af37da3c39ca453399e1f43b6108dd9ff6bdfa1885e9bddda5da79c412       ← the server keeps only this
 ```
 
 The code is `accessKey()` in [web/src/keys.ts](../../web/src/keys.ts). It uses WebCrypto.
@@ -50,7 +52,7 @@ The code is `accessKey()` in [web/src/keys.ts](../../web/src/keys.ts). It uses W
 Each member request sends the header:
 
 ```
-Authorization: Bearer w12HnRha1TekeupnN6JmZUsjz5UVc44WckyrUY8nt60
+Authorization: Bearer -opAqacwlYsMBtzqm8OLNy6fM6xa3MBHIPav8AuUxBI
 ```
 
 The server runs:
@@ -79,10 +81,10 @@ An outside system, for example a form tool, gets two values from a member:
 - an add key, to send it.
 
 ```
-add_key  = "sbx_" + base64url(24 random bytes)          (the server makes it)
-         = sbx_…
+add_key  = "vlt_" + base64url(24 random bytes)          (the server makes it)
+         = vlt_…
 add_hash = hex( SHA-256(add_key) )
-         = f380ac83935d686b327675b1738e388f7a7b92241ce56ca448538840783e4a4a       ← the server keeps only this
+         = 2e8700659d1ccec37997aca0d436d936a7274f693fe939e50fe13eeadfb78974       ← the server keeps only this
 ```
 
 The server shows the add key one time. A box has zero or one add key. **Replace add key** makes a new one, and the old one stops working. **Turn off** deletes the hash.
@@ -93,7 +95,7 @@ The add key works only for `POST /api/ingest/:id`. It cannot read, list or delet
 
 Other websites cannot use a member's access:
 
-- **No cookies.** The browser sends nothing automatically. Each request needs the access key, and the access key is only in the memory of the Secretbox tab.
+- **No cookies.** The browser sends nothing automatically. Each request needs the access key, and the access key is only in the memory of the Vault Box tab.
 - **No CORS headers.** Other websites cannot read the answers of the API.
 - **Strict CSP.** The page loads scripts only from its own address. It allows no inline scripts. The policy is in `HTML_HEADERS` in [server/app.ts](../../server/app.ts).
 

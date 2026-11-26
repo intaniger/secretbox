@@ -1,4 +1,4 @@
-# Secretbox
+# Vault Box
 
 Share confidential data with a link and Face ID. **No accounts. No emails.** The browser locks everything. The server keeps only locked files and hashes, so it cannot read names or contents.
 
@@ -7,7 +7,8 @@ A proof of concept. Encryption is [age](https://age-encryption.org) via [Typage]
 ## The idea
 
 - **One passkey per box.** The passkey list on your phone is your list of boxes.
-- **One-time invite links.** The person who invites types the new member's name. The new member types nothing: open the link, tap **Accept**.
+- **One-time invite links.** Select **Share** and type the new member's name. The new member types nothing: open the link, tap **Accept**.
+- **No names to type for yourself.** The person who makes a box is "You" to themselves, and "the box creator" to others.
 - **No roles.** Every member can read, add, invite and remove.
 
 ## What people do
@@ -70,11 +71,11 @@ Items are limited to 4 MB (Vercel accepts request bodies up to 4.5 MB).
 
 ## Add items from a form or script
 
-A member makes an **add key**: **Items** tab → **Let a form or script add items**. The add key can only add. It cannot read, list or delete. **Turn off** removes it.
+A member makes an **add key** on the box's **Integration** tab. The add key can only add. It cannot read, list or delete. **Turn off** removes it.
 
 ```sh
 age -r age1…box-public-key… answer.txt \
-  | curl --data-binary @- -H "Authorization: Bearer sbx_…" \
+  | curl --data-binary @- -H "Authorization: Bearer vlt_…" \
       "https://your-domain/api/ingest/BOX_ID"
 ```
 
@@ -97,7 +98,7 @@ This is a PoC. These are the main limits. [docs/08-security.md](docs/08-security
 - **The server sends the code that holds the keys.** A changed server can steal keys after unlock.
 - **Removal is not cryptographic.** A removed member who copied the box private key keeps access. To cut somebody off, make a new box.
 - **An invite link is a secret until somebody opens it.** The first person to open it joins.
-- **Not locked:** sizes, dates and counts. The passkey label shows the box name and the person's name.
+- **Not locked:** sizes, dates and counts. The passkey label shows the box name, and the person's name if they were invited.
 - **A lost passkey means lost access** for that person. Another member can send a new link.
 
 ## Code

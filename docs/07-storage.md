@@ -56,32 +56,32 @@ The values come from scenarios 1 to 5.
 
 | Column | Example | Locked? | What it is |
 |---|---|---|---|
-| `id` | `Ze3WdI5DdSbboy05-E6vhQ` | No | The box ID. Also the user ID of each passkey for this box. |
-| `public_key` | `age1aa0rtwwaz8rhsdt24338…` | No | The box public key. Anybody may lock data with it. |
+| `id` | `nbtYKFvPJE6MnspnIVuu4Q` | No | The box ID. Also the user ID of each passkey for this box. |
+| `public_key` | `age13aa297n0wgzsleu3hhsp…` | No | The box public key. Anybody may lock data with it. |
 | `name_locked` | age file, 212 bytes | **Yes** | "Finance 2026". |
-| `access_hash` | `753a4c5b86ec2461…` | Hash | SHA-256 of the access key. |
-| `add_hash` | `f380ac83935d686b…` or empty | Hash | SHA-256 of the add key, if a member made one. |
+| `access_hash` | `1ee2b4af37da3c39…` | Hash | SHA-256 of the access key. |
+| `add_hash` | `2e8700659d1ccec3…` or empty | Hash | SHA-256 of the add key, if a member made one. |
 | `created_at` | `1795683600000` | No | The time, in milliseconds. |
 
 ### `members`
 
 | `box_id` | `credential_id` | `envelope` | `name_locked` |
 |---|---|---|---|
-| `Ze3WdI5DdSbboy05-E6vhQ` | `jnx3yrksw0nZ_pk2v1xPmQ` | age file, 274 bytes: the box private key, for Tiger's passkey key | age file, 233 bytes: `{"name":"Tiger","invitedBy":null}` |
-| `Ze3WdI5DdSbboy05-E6vhQ` | `FSMScb5Fz658XBQXVw5XCA` | age file, 274 bytes: the box private key, for Nok's passkey key | age file, 234 bytes: `{"name":"Nok","invitedBy":"Tiger"}` |
+| `nbtYKFvPJE6MnspnIVuu4Q` | `BB-I_WwmhQyoq3USEVPrvA` | age file, 274 bytes: the box private key, for Tiger's passkey key | age file, 228 bytes: `{"name":"","invitedBy":null}` |
+| `nbtYKFvPJE6MnspnIVuu4Q` | `AyIKBj8-mZ8hDc8Q1fb2PQ` | age file, 274 bytes: the box private key, for Nok's passkey key | age file, 229 bytes: `{"name":"Nok","invitedBy":""}` |
 
 ### `items`
 
 | `id` | `label_locked` | `data_locked` |
 |---|---|---|
-| `…` | age file, 267 bytes: `{"name":"note.txt",…,"addedBy":"Tiger"}` | age file, 221 bytes: the note |
+| `…` | age file, 262 bytes: `{"name":"note.txt",…,"addedBy":""}` | age file, 221 bytes: the note |
 | `…` | empty | age file from an outside system |
 
 ### `invites`
 
 | `id` | `invite_file` | `name_locked` | `expires_at` |
 |---|---|---|---|
-| `iFhx-052UgwYFJqH7AhiuA` | age file, 320 bytes: the box private key and two names, for the one-time key | age file, 234 bytes: `{"name":"Nok","invitedBy":"Tiger"}` | `1795770000000` |
+| `crUC8B9PQQSYQ_-CBMvj7A` | age file, 315 bytes: the box private key and the names, for the one-time key | age file, 229 bytes: `{"name":"Nok","invitedBy":""}` | `1795770000000` |
 
 When Nok opened the link, the server deleted this row.
 
@@ -115,7 +115,7 @@ To unlock a box, they also need one of these:
 
 ## Old tables in the live database
 
-The first versions of Secretbox had accounts. The live database on Vercel still has their tables (`users`, `passkeys`, `sessions`, `webauthn_flows`, `memberships`, `ingest_tokens`) and some old columns. The new version does not read them. A later cleanup can delete them. See [technical/api-and-sql.md](technical/api-and-sql.md#upgrade-from-the-first-version).
+The first versions of Vault Box (then called Secretbox) had accounts. The live database on Vercel still has their tables (`users`, `passkeys`, `sessions`, `webauthn_flows`, `memberships`, `ingest_tokens`) and some old columns. The new version does not read them. A later cleanup can delete them. See [technical/api-and-sql.md](technical/api-and-sql.md#upgrade-from-the-first-version).
 
 ## Technical details
 

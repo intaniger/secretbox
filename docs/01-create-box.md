@@ -12,10 +12,10 @@ Tiger uses Face ID one time. Some devices ask two times.
 
 ## What Tiger sees
 
-1. Open Secretbox.
-2. Type a name ("Tiger") and a box name ("Finance 2026").
+1. Open Vault Box.
+2. Type a box name ("Finance 2026"). There is no name to type for yourself: in the box, the person who made it is "You".
 3. Select **Create box**.
-4. The phone asks to save a passkey with the name "Finance 2026 – Tiger". Confirm with Face ID.
+4. The phone asks to save a passkey with the name "Finance 2026". Confirm with Face ID.
 5. The box opens. It is empty.
 
 ## What happens, in plain words
@@ -26,7 +26,7 @@ Tiger uses Face ID one time. Some devices ask two times.
 4. With the same Face ID, the passkey gives its **PRF output**. This output is the private key of Tiger's **passkey key**.
 5. The browser locks the box private key with the passkey public key. The result is Tiger's **envelope**.
 6. The browser calculates the **access key** from the box private key.
-7. The browser locks the box name, and Tiger's name, with the box public key.
+7. The browser locks the box name with the box public key. It also locks Tiger's name file. The name in it is empty: nobody has named the person who made the box. The app shows Tiger as "You".
 8. The browser sends all of this to the server. The server keeps only the hash of the access key.
 
 ## Who talks to whom
@@ -37,7 +37,7 @@ sequenceDiagram
   participant P as Passkey on phone
   participant B as Browser
   participant S as Server
-  T->>B: Tiger, Finance 2026, Create box
+  T->>B: Finance 2026, Create box
   Note over B: C1. Make box key pair. C2. Make box ID
   B->>P: C3. Make a passkey. User ID = box ID. PRF input
   T->>P: Face ID
@@ -71,22 +71,22 @@ flowchart TD
 
 | Step | Input | Method | Output | Goes to |
 |---|---|---|---|---|
-| C1. Box key pair | Random bytes. | X25519 key generation (`age.generateX25519Identity`). | Box private key `AGE-SECRET-KEY-174SLE9SKAT…`. Box public key `age1aa0rtwwaz8rhsdt2…` | C5, C6, C7, C8 |
-| C2. Box ID | Random bytes. | 16 random bytes, in base64url. | `Ze3WdI5DdSbboy05-E6vhQ` | C3, C8 |
-| C3. Make the passkey | The box ID (C2) as the user ID. The label "Finance 2026 – Tiger". The PRF input `secretbox passkey key v1`. | WebAuthn `navigator.credentials.create` with the PRF extension. Tiger confirms with Face ID. | Credential ID `jnx3yrksw0nZ_pk2v1xPmQ`. PRF output `102c876b3d31d206…` | C4, C8 |
-| C4. Passkey key pair | The PRF output (C3), 32 bytes. | The 32 bytes are the X25519 private key. Bech32 writes it as text. X25519 calculates the public key. | Private key `AGE-SECRET-KEY-1ZQKGW6EAX8…`. Public key `age1l88akkymhz39h3ft…` | C5. The private key stays in tab memory. |
-| C5. Envelope | The box private key (C1). The passkey public key (C4). | The age recipe with an X25519 stanza: file key `11de376a…`, temporary public part `J4i8VohRwgZc7yBo…`, shared secret `fc792fcf55a406d4…`, wrap key `7893469b188bafd6…`. | The envelope, 274 bytes. Its payload holds the box private key (74 characters). | C8 |
-| C6. Access key | The box private key (C1), as 32 bytes `f561fc9616eafe34…`. | HMAC-SHA-256 with the box private key as the key, and the text `secretbox access key v1`. Then base64url. | `w12HnRha1TekeupnN6JmZUsjz5UVc44WckyrUY8nt60` | C8 |
-| C7. Name files | The text `Finance 2026`. The text `{"name":"Tiger","invitedBy":null}`. The box public key (C1). | The age recipe with an X25519 stanza, one time for each text. | The box name file, 212 bytes. Tiger's name file, 233 bytes. | C8 |
-| C8. Send | All the outputs above. | `POST /api/boxes`. The header `Authorization: Bearer` holds the access key. | The server calculates SHA-256 of the access key: `753a4c5b86ec2461…`. It keeps that hash, the box row and the member row. | [Scenario 2](02-open-box.md) |
+| C1. Box key pair | Random bytes. | X25519 key generation (`age.generateX25519Identity`). | Box private key `AGE-SECRET-KEY-1Z84DDGND8U…`. Box public key `age13aa297n0wgzsleu3…` | C5, C6, C7, C8 |
+| C2. Box ID | Random bytes. | 16 random bytes, in base64url. | `nbtYKFvPJE6MnspnIVuu4Q` | C3, C8 |
+| C3. Make the passkey | The box ID (C2) as the user ID. The label "Finance 2026". The PRF input `secretbox passkey key v1`. | WebAuthn `navigator.credentials.create` with the PRF extension. Tiger confirms with Face ID. | Credential ID `BB-I_WwmhQyoq3USEVPrvA`. PRF output `9fcc080d2bd5d392…` | C4, C8 |
+| C4. Passkey key pair | The PRF output (C3), 32 bytes. | The 32 bytes are the X25519 private key. Bech32 writes it as text. X25519 calculates the public key. | Private key `AGE-SECRET-KEY-1NLXQSRFT6H…`. Public key `age18wcj2lnje95fkz4c…` | C5. The private key stays in tab memory. |
+| C5. Envelope | The box private key (C1). The passkey public key (C4). | The age recipe with an X25519 stanza: file key `e8098c57…`, temporary public part `GiOSDxXQXStQbk9I…`, shared secret `37a1bb8e7b86476d…`, wrap key `be7f72ee0358b8ca…`. | The envelope, 274 bytes. Its payload holds the box private key (74 characters). | C8 |
+| C6. Access key | The box private key (C1), as 32 bytes `11ead6a26d3f3858…`. | HMAC-SHA-256 with the box private key as the key, and the text `secretbox access key v1`. Then base64url. | `-opAqacwlYsMBtzqm8OLNy6fM6xa3MBHIPav8AuUxBI` | C8 |
+| C7. Name files | The text `Finance 2026`. The text `{"name":"","invitedBy":null}` (an empty name). The box public key (C1). | The age recipe with an X25519 stanza, one time for each text. | The box name file, 212 bytes. Tiger's name file, 228 bytes. | C8 |
+| C8. Send | All the outputs above. | `POST /api/boxes`. The header `Authorization: Bearer` holds the access key. | The server calculates SHA-256 of the access key: `1ee2b4af37da3c39…`. It keeps that hash, the box row and the member row. | [Scenario 2](02-open-box.md) |
 
 Tiger's envelope, as the server keeps it:
 
 ```
 age-encryption.org/v1
--> X25519 J4i8VohRwgZc7yBo6B1t0WrPl9q0ntFIOeQjWx+zUzk
-whK46hZZVnClYimMrgzWcGwFh5kX4k3jiT744wXkh7c
---- Dl6Q101M4z+jvKj40mtyiCKiHdqi5sGFJAtGeQbAmPo
+-> X25519 GiOSDxXQXStQbk9IwxQxL95kV33YVdVLWt36uX7ToRw
+cBISyKUSsi5ezrLzCM+Aot3pZ8FI6ABIkolpPcdZPeI
+--- AbJEQMVyEqSnodxoCStX0CAWDJ51An+beTsbnbBG7DM
 [106 bytes: the box private key, locked]
 ```
 
@@ -109,20 +109,20 @@ Later, Tiger makes the box "HR 2027". The steps are the same. Each value is new:
 
 | Value | Finance 2026 | HR 2027 |
 |---|---|---|
-| Box ID (the passkey user ID) | `Ze3WdI5DdSbboy05-E6vhQ` | `dYGYxWLNJaQE8HJ1dtUQwQ` |
-| Passkey label | Finance 2026 – Tiger | HR 2027 – Tiger |
+| Box ID (the passkey user ID) | `nbtYKFvPJE6MnspnIVuu4Q` | `ZtyxjgXwP6m0Y13hJH1-Ow` |
+| Passkey label | Finance 2026 | HR 2027 |
 | PRF input | `secretbox passkey key v1` | `secretbox passkey key v1` (the same) |
-| PRF output | `102c876b3d31d206…` | `07137eb0500ce07e…` (different passkey, different output) |
-| Passkey public key | `age1l88akkymhz39h3ft…` | `age1hkg5vfswywdacnmy…` |
-| Box public key | `age1aa0rtwwaz8rhsdt2…` | `age15zzggdenmcp3pdsy…` |
-| Access key | `w12HnRha1Tekeupn…` | `8gOQd3QGcm3-7v2J…` |
+| PRF output | `9fcc080d2bd5d392…` | `1c4f3378f947bddb…` (different passkey, different output) |
+| Passkey public key | `age18wcj2lnje95fkz4c…` | `age1veh88r5ce3axg4xm…` |
+| Box public key | `age13aa297n0wgzsleu3…` | `age1wf2xenv5633sar32…` |
+| Access key | `-opAqacwlYsMBtzq…` | `ApFLUR7KiylHQXFh…` |
 
-Now Tiger's phone shows two passkeys for Secretbox:
+Now Tiger's phone shows two passkeys for Vault Box:
 
 ```
-secretbox-nu.vercel.app
-  ├─ Finance 2026 – Tiger    (user ID Ze3WdI5DdSbboy05-E6vhQ)
-  └─ HR 2027 – Tiger         (user ID dYGYxWLNJaQE8HJ1dtUQwQ)
+vlt.i7r.tech
+  ├─ Finance 2026    (user ID nbtYKFvPJE6MnspnIVuu4Q)
+  └─ HR 2027         (user ID ZtyxjgXwP6m0Y13hJH1-Ow)
 ```
 
 **Why one passkey for each box?**
@@ -135,7 +135,7 @@ secretbox-nu.vercel.app
 
 | Where | What |
 |---|---|
-| Phone or password manager | The passkey "Finance 2026 – Tiger". |
+| Phone or password manager | The passkey "Finance 2026". |
 | Server | The box ID, the box public key, the box name file, the access hash. One member row: the credential ID, the envelope, Tiger's name file. |
 | Browser tab memory | The box private key and the access key, until Tiger closes the tab or selects **Lock**. |
 

@@ -219,7 +219,7 @@ export function createApp(db: Db): Hono {
   // Making a new add key replaces the old one.
   app.post("/api/boxes/:id/add-key", async (c) => {
     const boxId = await member(c);
-    const addKey = `sbx_${newId(24)}`;
+    const addKey = `vlt_${newId(24)}`;
     await db.run("UPDATE boxes SET add_hash = ? WHERE id = ?", sha256(addKey), boxId);
     return c.json({ addKey });
   });
