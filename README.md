@@ -45,6 +45,7 @@ Data         — age files
 |---|---|
 | `users` | nickname, member `age1…` key |
 | `passkeys` | credential ID, public key (for login), **envelope** |
+| `sessions`, `webauthn_flows` | login sessions (hashed tokens) and short-lived passkey challenges |
 | `boxes` | name, box `age1…` key, **key history** |
 | `memberships` | role, **key copy** |
 | `items` | name, size, **age file** |
@@ -53,7 +54,7 @@ Data         — age files
 
 Everything in **bold** is an age file the server can't open.
 
-## Run it
+## Run it locally
 
 Requires Node.js 22.18+ (it runs the TypeScript server directly) and a passkey provider with PRF support: Apple Passwords (iOS 18+/macOS 15+), Google Password Manager (Chrome 132+), or a recent security key.
 
@@ -63,16 +64,29 @@ npm run build
 npm start            # http://localhost:8787
 ```
 
-For development, `npm run dev` runs the server and the Vite dev server (http://localhost:5173) with reload.
+No database setup is needed: without `DATABASE_URL`, the server uses [PGlite](https://pglite.dev) (Postgres compiled to WASM) and keeps its data in `.data/`. Set `DATABASE_URL` to use a real Postgres.
 
-Passkeys work on `http://localhost`. To try it on a phone you need HTTPS on a real domain (a tunnel works), and these settings:
+For development, `npm run dev` runs the server and the Vite dev server (http://localhost:5173) with reload.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `PORT` | `8787` | Server port |
-| `RP_ID` | `localhost` | Passkey domain. **Passkeys only work on this domain**, so choose it before real users join |
-| `ORIGINS` | `http://localhost:8787,http://localhost:5173` | Allowed origins, comma-separated. The first one decides whether cookies are `Secure` |
-| `DB_PATH` | `secretbox.db` | SQLite file |
+| `ORIGINS` | `http://localhost:8787,http://localhost:5173` | Addresses people use, comma-separated. Each one is its own **passkey domain** |
+| `DATABASE_URL` | — | Postgres URL. Without it: PGlite |
+| `DB_PATH` | `.data` | PGlite data directory (`:memory:` for none) |
+
+## Deploy to Vercel
+
+The project deploys with the [Build Output API](https://vercel.com/docs/build-output-api): `npm run build:vercel` writes `.vercel/output/` with the static web app, the API bundled into one Node.js function, and the routes (see `scripts/build-vercel.mjs`). Vercel runs exactly what `npm run test:vercel` tests.
+
+1. Create a Vercel project and connect this repository. `vercel.json` sets the build command.
+2. Connect a Postgres database: **Storage → Neon**. The integration adds `DATABASE_URL` (or `<PREFIX>_DATABASE_URL`, which also works). The tables are created on the first request.
+3. Put the functions in the database's region (**Settings → Functions**). Each request makes a few queries, so distance adds up.
+4. Turn **Vercel Authentication** off for production, or use a custom domain. Otherwise readers hit a Vercel login.
+
+**Passkey domains:** the production domain, preview URLs, and any address in `ORIGINS` are allowed. **Passkeys only work on the domain they were made on**, so choose the final domain before real users join. For a custom domain, add it to `ORIGINS` (e.g. `https://secretbox.example.com`).
+
+**Limit:** Vercel Functions accept request bodies up to 4.5 MB, so items are limited to 4 MB.
 
 ## Add data from another system
 
@@ -90,11 +104,14 @@ ASCII-armored files (`age -a`) are accepted too. Plaintext is rejected.
 ## Test
 
 ```sh
-npm test                   # builds, then runs test/e2e.mjs
+npm test                   # builds, then runs test/e2e.mjs against the local server
+npm run test:vercel        # the same journey against the Vercel build output
 SCREENSHOTS=1 npm test     # also saves phone-size screenshots to test-results/
 ```
 
 The test runs the full journey in headless Chrome. Each person has their own browser profile and a **virtual passkey authenticator with PRF** (Chrome DevTools Protocol), so the real WebAuthn and PRF code runs. It checks the number of passkey prompts, one-time links, link previews, outside-system uploads, removal with a key change, and that the database holds no plaintext or secret keys. Set `CHROME_PATH` if Chrome isn't found.
+
+`test:vercel` runs the bundled function from `.vercel/output`, routed by the regexes in its `config.json`, talking to Postgres over the wire protocol with `pg` (PGlite behind [pglite-socket](https://pglite.dev) stands in for Neon).
 
 `npm run check` type-checks the server and the web app.
 
@@ -108,17 +125,23 @@ This is a PoC. Know these before you trust it with real data:
 - **Not encrypted:** file names, sizes, dates, nicknames, box names, member lists.
 - **Lost passkey = lost access** for that person. Synced passkeys (iCloud, Google) make this rare. An admin can send a new invite. There's no paper recovery key and no "add device" flow yet.
 - **An invite link is a secret until it's used.** Anyone who opens it first gets in. Send it privately, and keep expiry short.
-- **PoC infrastructure:** one process, SQLite, in-memory login challenges, no rate limits, no audit log.
+- **PoC infrastructure:** no rate limits, no audit log, items up to 4 MB.
 - **Typage's WebAuthn API is marked experimental.** The version is pinned in `package-lock.json`.
 - **Keys are X25519, not post-quantum.** Switching to `generateHybridIdentity()` is one line in `web/src/keys.ts`, but outside systems then need age v1.3+.
 
 ## Code
 
 ```
-server/index.ts     API: passkey login, boxes, items, invites, key change (Hono + node:sqlite)
-server/db.ts        schema
-web/src/keys.ts     all cryptography (Typage): key pairs, lock/unlock, passkey identity
-web/src/vault.ts    user actions built from keys + API, with prompt counts
-web/src/main.ts     UI (no framework)
-test/e2e.mjs        end-to-end journey test
+server/app.ts            API: passkey login, boxes, items, invites, key change (Hono)
+server/db.ts             schema + a tiny query interface
+server/db-pg.ts          Postgres via node-postgres (Neon on Vercel)
+server/db-pglite.ts      PGlite for local development and tests
+server/node.ts           local server: API + web app
+server/vercel.ts         Vercel Function entry
+scripts/build-vercel.mjs Vercel Build Output API
+web/src/keys.ts          all cryptography (Typage): key pairs, lock/unlock, passkey identity
+web/src/vault.ts         user actions built from keys + API, with prompt counts
+web/src/main.ts          UI (no framework)
+test/e2e.mjs             end-to-end journey test
+test/vercel-harness.mjs  runs the Vercel build output locally
 ```

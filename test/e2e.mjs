@@ -3,11 +3,12 @@
 // authenticator with PRF support (Chrome DevTools Protocol), so real
 // WebAuthn + PRF code paths run — nothing is mocked.
 //
-//   npm test            (builds, then runs this)
+//   npm test              (builds, then runs this against server/node.ts)
+//   npm run test:vercel   (same journey against the Vercel build output)
 //   CHROME_PATH=/path/to/chrome npm test
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -16,7 +17,7 @@ import * as age from "age-encryption";
 
 const PORT = 8790;
 const BASE = `http://localhost:${PORT}`;
-const DB = join(tmpdir(), `secretbox-e2e-${process.pid}.db`);
+const DB = join(tmpdir(), `secretbox-e2e-${process.pid}`); // PGlite data directory
 
 const CHROME =
   process.env.CHROME_PATH ??
@@ -40,8 +41,11 @@ const log = (msg) => console.log(`  ${String(++step).padStart(2)}. ${msg}`);
 
 // --- Server ------------------------------------------------------------------
 
-const server = spawn(process.execPath, ["--no-warnings", "server/index.ts"], {
-  env: { ...process.env, PORT: String(PORT), DB_PATH: DB, ORIGINS: BASE },
+const env = { ...process.env, PORT: String(PORT), DB_PATH: DB, ORIGINS: BASE };
+delete env.DATABASE_URL; // always test against a fresh local PGlite
+// E2E_SERVER=test/vercel-harness.mjs runs the same journey against the Vercel build output.
+const server = spawn(process.execPath, ["--no-warnings", process.env.E2E_SERVER ?? "server/node.ts"], {
+  env,
   stdio: ["ignore", "pipe", "inherit"],
 });
 await new Promise((resolve, reject) => {
@@ -260,7 +264,10 @@ try {
   log("Bee signs out and signs in again with her passkey");
 
   // --- What the server stored
-  const raw = Buffer.concat([DB, `${DB}-wal`].filter(existsSync).map((f) => readFileSync(f))).toString("latin1");
+  // Make PGlite flush to disk, then scan every data file.
+  await fetch(`${BASE}/api/me`);
+  const files = (dir) => readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? files(join(dir, f)) : [join(dir, f)]));
+  const raw = Buffer.concat(files(DB).map((f) => readFileSync(f))).toString("latin1");
   for (const secret of ["Salary sheet", "Form answer", "Armored answer", "after the key change", "AGE-SECRET-KEY-1"]) {
     assert.ok(!raw.includes(secret), `server storage contains "${secret}"`);
   }
@@ -274,6 +281,6 @@ try {
 } finally {
   await browser.close();
   server.kill();
-  for (const f of [DB, `${DB}-wal`, `${DB}-shm`]) rmSync(f, { force: true });
+  rmSync(DB, { recursive: true, force: true });
   process.exit(failed ? 1 : 0);
 }

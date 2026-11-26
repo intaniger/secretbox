@@ -3,23 +3,30 @@
   "version": "0.1.0",
   "description": "PoC: share confidential data with one-time invite links. Readers unlock it with a passkey (WebAuthn PRF + age).",
   "scripts": {
-    "dev": "concurrently -k -n server,web -c blue,green \"node --watch server/index.ts\" \"vite\"",
+    "dev": "concurrently -k -n server,web -c blue,green \"node --watch server/node.ts\" \"vite\"",
     "build": "vite build",
-    "start": "node server/index.ts",
+    "build:vercel": "vite build && node scripts/build-vercel.mjs",
+    "start": "node server/node.ts",
     "check": "tsc --noEmit",
-    "test": "vite build && node test/e2e.mjs"
+    "test": "vite build && node test/e2e.mjs",
+    "test:vercel": "npm run build:vercel && E2E_SERVER=test/vercel-harness.mjs node test/e2e.mjs"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.6.0",
     "@hono/node-server": "^2.1.11",
     "@scure/base": "^2.4.0",
     "@simplewebauthn/browser": "^14.0.0",
     "@simplewebauthn/server": "^14.1.0",
     "age-encryption": "^0.3.1",
-    "hono": "^4.13.22"
+    "hono": "^4.13.22",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite-socket": "^0.3.0",
     "@types/node": "^22.20.7",
+    "@types/pg": "^8.23.1",
     "concurrently": "^10.0.7",
+    "esbuild": "^0.28.2",
     "puppeteer-core": "^25.19.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"
