@@ -321,9 +321,10 @@ function addTools({ d, refresh }: BoxCtx): Child[] {
   const composer = form({ class: "card composer", hidden: true }, () =>
     act(save, "Locking…", async () => {
       if (!text.value) throw Error("Write the note first.");
-      await vault.addData(d, title.value.trim() || "Untitled note", "text/plain", text.value);
+      const name = title.value.trim() || "Untitled note";
+      await vault.addData(d, name, "text/plain", text.value);
       await refresh();
-      say("Saved. It was locked on this device before upload.", "ok");
+      say(`Saved “${name}”. Only people in this box can read it.`, "ok");
     }),
     h("label", {}, "Title", title),
     h("label", {}, "Note", text),
@@ -353,7 +354,7 @@ function addTools({ d, refresh }: BoxCtx): Child[] {
         fileInput.value = ""; // so the same file can be chosen again
       }
       await refresh();
-      say(`Uploaded “${f.name}”. It was locked on this device before upload.`, "ok");
+      say(`Uploaded “${f.name}”. Only people in this box can read it.`, "ok");
     });
   };
 
@@ -583,7 +584,11 @@ function shareDialog({ d, refresh }: BoxCtx) {
     if (share) share.onclick = () => navigator.share({ url }).catch(() => {});
     return h("div", { class: "sheet-body" },
       h("h2", { id: "share-title" }, `The link for ${them} is ready`),
-      h("p", { class: "muted small" }, "Send it in a private chat. It works one time, and it is shown only now."),
+      h("p", { class: "callout", "data-test": "link-once" },
+        h("strong", {}, "Copy it now. It won't be shown again."),
+        "Your browser made this link, and the server never stores it. Once you close this, it's gone.",
+      ),
+      h("p", { class: "muted small" }, `Send it to ${them} in a private chat. It works one time.`),
       h("input", { readOnly: true, value: url, "aria-label": "Invite link", "data-test": "invite-link", onfocus: (e: Event) => (e.target as HTMLInputElement).select() }),
       h("div", { class: "buttons" },
         copyButton(url, "Copy link", { class: "primary" }),

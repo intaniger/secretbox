@@ -222,6 +222,9 @@ dialog.sheet::backdrop { background: rgb(0 0 0 / 0.5); }
 .sheet-body > .muted { margin-bottom: 16px; }
 .sheet-body > input[readonly] { margin-bottom: 12px; font-size: 0.85rem; }
 .sheet-body .error { margin-top: -4px; }
+/* The one thing to know about a fresh link: it can't be shown again. */
+.callout { margin: 8px 0 10px; padding: 10px 12px; border-radius: 10px; background: var(--accent-bg); font-size: 0.9rem; }
+.callout strong { display: block; color: var(--accent); }
 
 /* --- Join ------------------------------------------------------------------- */
 .join h1 { font-size: 1.35rem; margin-bottom: 4px; overflow-wrap: anywhere; }
