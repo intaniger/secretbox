@@ -4,31 +4,25 @@
 
 ## In short
 
-An invite link works one time and for a limited time. After that, the page shows a message and does not let anybody join.
+An invite link works one time, and only for a limited time. After that, the server has no invite file for it. So the one-time private key in the link unlocks nothing.
 
-Two things make the link useless:
-
-1. **The server lets only one person use the link.** A second person gets the message "already used".
-2. **The server deletes the invite file** when the person finishes joining. The one-time private key in the link then has nothing to unlock.
-
-> **CAUTION:** In some cases the server does **not** delete the invite file. See [What stays in the database](#what-stays-in-the-database). These cases are flaws. [Document 8](08-security.md) lists them.
+The server gives one answer for all cases. The row is gone, so the server cannot know which case it is.
 
 ## What Mallory sees
 
-Mallory finds Nok's link in an old chat, after Nok joined.
+Mallory finds Nok's link in an old chat. Nok used it before.
 
-1. Open the link.
-2. The page shows: "This invite was already used. Ask the person who sent it for a new link."
-3. There is no **Accept** button.
-
-With an expired link, the page shows "This invite has expired." With a canceled link, it shows "This invite was canceled."
+1. Open the link. The page says "Somebody invited you to a box".
+2. Select **Open invite**.
+3. The page shows: "This link was already used, has expired, or was canceled."
+4. Mallory gets nothing: no box name, no names, no key.
 
 ## What happens, in plain words
 
-1. The page loads. The browser reads the one-time private key from the link into memory.
-2. The browser asks the server for the invite status. The server changes nothing.
-3. The status is not "open", so the page shows a message and stops.
-4. The browser does not send the one-time private key anywhere. It does not ask for the invite file.
+1. Mallory's browser reads the one-time private key from the `#` part. This key is correct.
+2. **Open invite** asks the server for the invite.
+3. The server looks for an open row with this ID. There is none, because the server deleted it when Nok opened the link.
+4. The server answers "not found". Without the invite file, the one-time private key is useless.
 
 ## Who talks to whom
 
@@ -37,103 +31,79 @@ sequenceDiagram
   actor M as Mallory
   participant B as Browser
   participant S as Server
-  M->>B: Open the used link
-  Note over B: Keep the one-time private key in memory
-  B->>S: GET /api/invites/ID
-  S-->>B: Status used, box name, inviter, role
-  B-->>M: This invite was already used
+  M->>B: Open the old link, Open invite
+  B->>S: POST /api/invites/iFhx-052UgwYFJqH7AhiuA/claim
+  Note over S: DELETE … WHERE id = ? AND expires_at > now: 0 rows
+  S-->>B: 404 This link was already used, has expired, or was canceled
+  B->>M: The message
 ```
 
-## How the page and the server decide
+## The four cases
 
-```mermaid
-flowchart TD
-  O["Open the link"] --> H{"Is there a key<br/>after the # sign?"}
-  H -->|No| X1["This link is incomplete"]
-  H -->|Yes| ST{"Invite status<br/>from the server"}
-  ST -->|canceled| X2["This invite was canceled"]
-  ST -->|used| X3["This invite was already used"]
-  ST -->|expired| X4["This invite has expired"]
-  ST -->|open| A["Show Accept"]
-  A --> C{"Claim on the server:<br/>unused, not canceled,<br/>file present, not expired?"}
-  C -->|No| X5["Refused: 410"]
-  C -->|Yes| J["Give the invite file<br/>to this person only"]
-```
-
-The server calculates the status in this order:
-
-| Order | Status | Condition in the invite row |
+| Case | Why the claim finds no row | When the server deleted the invite file |
 |---|---|---|
-| 1 | canceled | `canceled_at` has a value. |
-| 2 | used | `used_by` or `completed_at` has a value. |
-| 3 | expired | `expires_at` is in the past. |
-| 4 | open | None of the conditions above. |
+| **Used** | The first person who selected **Open invite** got the row. | At that claim, in the same statement. |
+| **Canceled** | A member selected **Cancel**. | At the cancel. |
+| **Expired** | The claim asks for `expires_at > now`. | When somebody makes or opens any invite after the time limit. Until then the row stays, but the server never gives it out. |
+| **Wrong ID** | The ID is not in the database. | There was never a row. |
 
 ## Steps: input, method, output
 
 | Step | Input | Method | Output | Goes to |
 |---|---|---|---|---|
-| 1. Read the link | The link `…/join/n2Wct0b4C-ivqkLH2pCjjw#AGE-SECRET-KEY-1ZQYRVJWHT7S…` | The browser reads the part after `#`. | The one-time private key, in memory only. | Not used |
-| 2. Get the status | The invite ID. | `GET /api/invites/:id`. No sign-in is necessary. Nothing changes. | Box name "Finance 2026". Inviter "Tiger". Label "Nok, finance". Role "reader". Status "used". | Step 3 |
-| 3. Decide | The status. | The page compares it with "open". | A message. No **Accept** button. | |
+| R1. Read the link | The link. | The browser reads the `#` part. | One-time private key `AGE-SECRET-KEY-1VVSKC8UZAP…` | R3 |
+| R2. Claim | The invite ID `iFhx-052UgwYFJqH7AhiuA`. | The server first deletes all expired invites. Then it runs `DELETE FROM invites WHERE id = ? AND expires_at > ? RETURNING box_id, invite_file`. | 0 rows. HTTP 404. | R3 |
+| R3. Unlock | The one-time private key (R1). No invite file. | Nothing to unlock. | Nothing. | |
 
-### If Mallory sends the claim herself
+## Another person uses the link first
 
-Mallory can make an account and call the API directly, without the page. The server still refuses:
+This case is different. The link goes to a group chat by mistake. Mallory opens it **before** Nok.
 
-| Step | Input | Method | Output |
-|---|---|---|---|
-| A. Claim | The invite ID. Mallory's session cookie. | `POST /api/invites/:id/claim`. The `UPDATE … WHERE used_by IS NULL …` statement changes 0 rows. | `410`: "This invite was already used." |
-| B. Unlock | The one-time private key. | She has no invite file. The server did not give it to her, and the server deleted it. | Nothing |
+1. Mallory selects **Open invite**, then **Accept and make passkey**. She joins the box.
+2. The member list shows her as "Nok, invited by Tiger", because Tiger typed that name.
+3. Later, the real Nok opens the link. She sees "already used".
 
-## Each status, and what is left
+```mermaid
+sequenceDiagram
+  actor M as Mallory
+  actor N as Nok
+  participant S as Server
+  M->>S: Claim (first)
+  S-->>M: Invite file. Delete the row
+  Note over M: Mallory has the box private key. She joins as "Nok"
+  N->>S: Claim (second)
+  S-->>N: 404 already used
+  N->>N: Tell Tiger
+```
 
-| Status | How it happens | Invite file in the database | Can a person still join? |
-|---|---|---|---|
-| open | Not used, not expired, not canceled. | Kept | Yes. The first person who selects **Accept**. |
-| used, completed | The person finished joining. | **Deleted** | No |
-| used, not completed | The person claimed, but the join stopped before step 9 of [scenario 5](05-use-invite.md). | **Kept** | The server allows only that same person. But the page shows "already used", so that person cannot finish through the page. This is a flaw. |
-| expired | The time limit passed before anybody used it. | **Kept** | No. This is a flaw: the server should delete the file. |
-| canceled | An admin canceled it, or an admin changed the box key. | **Deleted** | No |
+**What Tiger must do:**
+
+1. Believe Nok. Somebody else has the box private key.
+2. Remove the false "Nok". This deletes only her envelope. She can keep the box private key and the access key. See [flaw 2](08-security.md#2-removal-deletes-only-the-envelope).
+3. To stop her fully: make a new box, move the data into it, and invite the correct people.
+
+**How to prevent it:** Send links only in private chats. Use short time limits. Ask the person to tell you when they joined.
 
 ## What stays in the database
 
-In two statuses, the database keeps the invite file after the link stops working: "expired" and "used, not completed".
+| State | Invite row | Invite file |
+|---|---|---|
+| Open | Yes | Yes |
+| Used | No | No |
+| Canceled | No | No |
+| Expired, before the next invite action | Yes, but the server never gives it out | Yes |
+| Expired, after the next invite action | No | No |
 
-A deleted file can also stay in database backups. Neon, the database service, keeps a restore history.
+"Deleted" means that the row is gone from the live database. Database backups and the restore history of Neon can still have it. See [flaw 4](08-security.md#4-deleted-invite-files-stay-in-backups).
 
-The danger needs **two** things together:
+## Result
 
-```mermaid
-flowchart LR
-  L["The one-time private key<br/>from an old chat"] --> U["Unlock"]
-  F["The invite file<br/>from the database or a backup"] --> U
-  U --> BK["The box private key<br/>of that time"]
-```
-
-A person who has both gets the box private key of that time. With it, the person can read each item that this box key locked. To get those items, the person needs the database or a backup too.
-
-The page and the API cannot give the invite file to such a person. The danger is only for a person with access to the database or its backups.
-
-## What Tiger sees
-
-In the box page, under **Invites**, Tiger sees each invite with its status and who used it. For example: "Nok, finance · used · used by Nok".
-
-If the wrong person used a link, Tiger can remove that person. This changes the box key. See [document 7](07-storage.md#key-history-after-a-member-is-removed).
-
-## A link that leaks before it is used
-
-The link is a secret until somebody uses it. If Mallory gets the link **before** Nok, Mallory can join. Then Nok sees "already used".
-
-To decrease this risk:
-
-1. Send the link in a private chat only.
-2. Use a short time limit.
-3. After somebody uses the invite, look at **used by** in the invite list.
+| Action | Face ID |
+|---|---|
+| Open a used, expired or canceled link | 0. The page stops before the passkey step. |
 
 ## Technical details
 
 - [API calls and database statements](technical/api-and-sql.md)
-- [Security flaws and limits](08-security.md)
 
 [← Previous](05-use-invite.md) · [Next: what the database keeps →](07-storage.md)

@@ -1,15 +1,15 @@
-// All cryptography lives here. It's a thin layer over age (Typage).
+// All cryptography lives here: a thin layer over age (Typage) and WebCrypto.
+// passkey.ts turns a passkey into the passkey key.
 //
 //   Passkey (Face ID + PRF)
-//     │  unlocks the ENVELOPE      (age file, fido2prf stanza)
-//   Member key   — one per person (age X25519)
-//     │  unlocks the KEY COPY      (age file, X25519 stanza)
-//   Box key      — one per box    (age X25519)
-//     │  unlocks
-//   Data         — age files
+//     │  its PRF output is the PASSKEY KEY   (age X25519 private key)
+//     │  which unlocks the ENVELOPE          (age file, X25519 stanza)
+//   Box key — one per box                    (age X25519)
+//     │  unlocks names, labels and data      (age files)
+//     │  and gives the ACCESS KEY            (HMAC-SHA-256; the server checks its hash)
 //
-// Secrets (age identities) exist only in this tab's memory. The server only
-// ever receives age files and age1... public keys.
+// Private keys exist only in this tab's memory. The server only ever receives
+// age files, age1... public keys and the access key.
 
 import * as age from "age-encryption";
 import { bech32 } from "@scure/base";
@@ -20,6 +20,35 @@ export type KeyPair = { identity: string; recipient: string };
 export async function newKeyPair(): Promise<KeyPair> {
   const identity = await age.generateX25519Identity();
   return { identity, recipient: await age.identityToRecipient(identity) };
+}
+
+/** The age key pair whose private key is exactly these 32 bytes (a PRF output). */
+export async function keyPairFromSecret(secret: Uint8Array): Promise<KeyPair> {
+  if (secret.length !== 32) throw Error("A private key is 32 bytes");
+  const identity = bech32.encode("AGE-SECRET-KEY-", bech32.toWords(secret), false).toUpperCase();
+  return { identity, recipient: await age.identityToRecipient(identity) };
+}
+
+export const publicKeyOf = (identity: string) => age.identityToRecipient(identity);
+
+/** The 32 bytes inside an AGE-SECRET-KEY-1... string. */
+function secretOf(identity: string): Uint8Array {
+  const { prefix, words } = bech32.decode(identity.toLowerCase() as `${string}1${string}`, false);
+  if (prefix !== "age-secret-key-") throw Error("Not an age X25519 identity");
+  return bech32.fromWords(words);
+}
+
+/**
+ * The box's access key: HMAC-SHA-256(box private key, "secretbox access key v1").
+ * Only someone with the box private key can make it. The server stores its
+ * SHA-256 hash and asks for it on every member request.
+ */
+export async function accessKey(boxIdentity: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw", secretOf(boxIdentity) as Uint8Array<ArrayBuffer>, { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("secretbox access key v1"));
+  return toB64url(new Uint8Array(mac));
 }
 
 /** Lock data to a public age1... key. Needs no passkey. */
@@ -42,66 +71,10 @@ export async function unlockText(identities: string[], file: Uint8Array): Promis
   return d.decrypt(file, "text");
 }
 
-/**
- * Lock data to a passkey (fido2prf). This asks for Face ID / fingerprint:
- * passkey recipients are symmetric, so only the passkey's owner can do it.
- */
-export async function lockToPasskey(passkey: string, data: string): Promise<Uint8Array> {
-  const e = new age.Encrypter();
-  e.addRecipient(new age.webauthn.WebAuthnRecipient({ identity: passkey }));
-  return e.encrypt(data);
-}
-
-/** Unlock an envelope with the passkey. Asks for Face ID / fingerprint. */
-export async function unlockWithPasskey(passkey: string, file: Uint8Array): Promise<string> {
-  const d = new age.Decrypter();
-  d.addIdentity(new age.webauthn.WebAuthnIdentity({ identity: passkey }));
-  return d.decrypt(file, "text");
-}
-
-/**
- * Builds Typage's passkey identity string (AGE-PLUGIN-FIDO2PRF-1...) for a
- * credential we registered ourselves. It's bech32(CBOR[1, credId, rpId,
- * transports]) — the same encoding as age.webauthn.createCredential returns.
- * Passing it to WebAuthnRecipient/WebAuthnIdentity makes the browser use
- * exactly this passkey instead of asking the user to pick one.
- */
-export function passkeyIdentity(credentialId: string, transports: string[], rpId = location.hostname): string {
-  const enc = new TextEncoder();
-  const credId = base64urlToBytes(credentialId);
-  const text = (s: string) => {
-    const b = enc.encode(s);
-    return [cborHead(3, b.length), b];
-  };
-  const parts: Uint8Array[] = [
-    cborHead(0, 1),
-    cborHead(2, credId.length),
-    credId,
-    ...text(rpId),
-    cborHead(4, transports.length),
-    ...transports.flatMap(text),
-  ];
-  return bech32.encode("AGE-PLUGIN-FIDO2PRF-", bech32.toWords(concat(parts)), false).toUpperCase();
-}
-
-function cborHead(major: number, n: number): Uint8Array {
-  if (n <= 23) return new Uint8Array([(major << 5) | n]);
-  if (n <= 0xff) return new Uint8Array([(major << 5) | 24, n]);
-  if (n <= 0xffff) return new Uint8Array([(major << 5) | 25, n >> 8, n & 0xff]);
-  throw Error("cbor: value too large");
-}
-
 // --- Encoding helpers ---------------------------------------------------------
 
-export function concat(parts: Uint8Array[]): Uint8Array {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let o = 0;
-  for (const p of parts) {
-    out.set(p, o);
-    o += p.length;
-  }
-  return out;
-}
+/** 16 random bytes, base64url. Used for box IDs. */
+export const randomId = () => toB64url(crypto.getRandomValues(new Uint8Array(16)));
 
 export function toB64(bytes: Uint8Array): string {
   let s = "";
@@ -113,7 +86,9 @@ export function fromB64(s: string): Uint8Array {
   return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 }
 
-function base64urlToBytes(s: string): Uint8Array {
+export const toB64url = (bytes: Uint8Array) => toB64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+export function fromB64url(s: string): Uint8Array {
   const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
   return fromB64(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
 }

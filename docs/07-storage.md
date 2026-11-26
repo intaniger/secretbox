@@ -4,173 +4,121 @@
 
 ## In short
 
-The database is Postgres (Neon). It keeps three kinds of things:
+The database has four tables: `boxes`, `members`, `items` and `invites`. Each private value is an age file. The server cannot unlock any of them.
 
-1. **Locked files (age files).** The envelopes, the key copies, the items, the invite files and the key history. The server cannot open them.
-2. **Public keys.** They can lock, but they cannot unlock. So they are not secret.
-3. **Information that is not locked.** Names, sizes, dates and who is in which box.
-
-The database never keeps these in a form that a person can read: private keys, passkey outputs, the data of items, sign-in tokens.
-
-## Which key unlocks which column
-
-```mermaid
-flowchart TD
-  PK["Passkey + Face ID<br/>(on the phone)"] -->|unlocks| ENV["passkeys.envelope"]
-  ENV -->|gives| MK["Member private key"]
-  MK -->|unlocks| KC["memberships.key_copy"]
-  KC -->|gives| BK["Box private key"]
-  BK -->|unlocks| IT["items.ciphertext"]
-  BK -->|unlocks| KH["boxes.key_history"]
-  KH -->|gives| OLD["Old box private keys"]
-  OLD -->|unlock| IT
-  LINK["One-time private key<br/>(in the invite link)"] -->|unlocks| IF["invites.invite_file"]
-  IF -->|gives| BK
-```
+The server keeps no accounts, no passwords, no email addresses, no passkey public keys and no sessions. It keeps the hash of each access key and each add key, not the keys.
 
 ## The tables
 
 ```mermaid
 erDiagram
-  users ||--o{ passkeys : "has"
-  users ||--o{ sessions : "has"
-  passkeys ||--o{ sessions : "signs in"
-  users ||--o{ memberships : "has"
-  boxes ||--o{ memberships : "has"
-  boxes ||--o{ items : "holds"
+  boxes ||--o{ members : "has"
+  boxes ||--o{ items : "has"
   boxes ||--o{ invites : "has"
-  boxes ||--o{ ingest_tokens : "has"
+  boxes {
+    text id PK "box ID = passkey user ID"
+    text public_key "age1..."
+    bytea name_locked "age file"
+    text access_hash "SHA-256"
+    text add_hash "SHA-256 or empty"
+    bigint created_at
+  }
+  members {
+    text box_id PK
+    text credential_id PK "passkey ID"
+    bytea envelope "age file"
+    bytea name_locked "age file"
+    bigint created_at
+  }
+  items {
+    text id PK
+    text box_id
+    bytea label_locked "age file or empty"
+    bytea data_locked "age file"
+    bigint created_at
+  }
+  invites {
+    text id PK
+    text box_id
+    bytea invite_file "age file"
+    bytea name_locked "age file"
+    bigint expires_at
+  }
 ```
 
-In the tables below, **Locked** means "an age file". **Hash** means "a SHA-256 value that nobody can reverse".
+Every column with a name that ends in `_locked` holds an age file. The box public key locked it, so only members can unlock it.
 
-### users: one row for each person
+## Example rows
 
-| Column | Kind | Example | Notes |
+The values come from scenarios 1 to 5.
+
+### `boxes`
+
+| Column | Example | Locked? | What it is |
 |---|---|---|---|
-| `id` | Clear | random ID | 16 random bytes, base64url. |
-| `nickname` | Clear | `Tiger` | The person types it. |
-| `webauthn_user_id` | Clear | random ID | The user ID inside the passkey. |
-| `member_recipient` | Public key | `age1gffpl2mrf5g92mje…` | Locks key copies for this person. |
-| `created_at` | Clear | time in milliseconds | |
+| `id` | `Ze3WdI5DdSbboy05-E6vhQ` | No | The box ID. Also the user ID of each passkey for this box. |
+| `public_key` | `age1aa0rtwwaz8rhsdt24338…` | No | The box public key. Anybody may lock data with it. |
+| `name_locked` | age file, 212 bytes | **Yes** | "Finance 2026". |
+| `access_hash` | `753a4c5b86ec2461…` | Hash | SHA-256 of the access key. |
+| `add_hash` | `f380ac83935d686b…` or empty | Hash | SHA-256 of the add key, if a member made one. |
+| `created_at` | `1795683600000` | No | The time, in milliseconds. |
 
-### passkeys: one row for each passkey
+### `members`
 
-| Column | Kind | Example | Notes |
+| `box_id` | `credential_id` | `envelope` | `name_locked` |
 |---|---|---|---|
-| `id` | Clear | `nIqF2ASScSdBg5JqLm1Kcw` | The passkey credential ID. |
-| `user_id` | Clear | Tiger's ID | |
-| `public_key` | Public key | COSE bytes | Verifies sign-in signatures. It cannot unlock anything. |
-| `counter` | Clear | `0` | The passkey's signature counter. |
-| `transports` | Clear | `["internal","hybrid"]` | How the browser can reach the passkey. |
-| `envelope` | **Locked** | 274 bytes, fido2prf stanza | Holds the member private key. Only this passkey unlocks it. |
+| `Ze3WdI5DdSbboy05-E6vhQ` | `jnx3yrksw0nZ_pk2v1xPmQ` | age file, 274 bytes: the box private key, for Tiger's passkey key | age file, 233 bytes: `{"name":"Tiger","invitedBy":null}` |
+| `Ze3WdI5DdSbboy05-E6vhQ` | `FSMScb5Fz658XBQXVw5XCA` | age file, 274 bytes: the box private key, for Nok's passkey key | age file, 234 bytes: `{"name":"Nok","invitedBy":"Tiger"}` |
 
-### sessions: one row for each sign-in
+### `items`
 
-| Column | Kind | Example | Notes |
-|---|---|---|---|
-| `token_hash` | **Hash** | `a01c59a2922989…` | The cookie holds the token `vjCmUsAHogdl4B-Y…`. The database keeps only its hash. |
-| `user_id`, `passkey_id` | Clear | | Which person and which passkey signed in. |
-| `expires_at` | Clear | 30 days after sign-in | |
-
-### webauthn_flows: passkey challenges
-
-| Column | Kind | Notes |
+| `id` | `label_locked` | `data_locked` |
 |---|---|---|
-| `id`, `challenge` | Clear | A random challenge for one passkey request. |
-| `data` | Clear | The address, the passkey domain and the nickname. |
-| `expires_at` | Clear | 5 minutes. The server deletes the row when it uses it. |
+| `…` | age file, 267 bytes: `{"name":"note.txt",…,"addedBy":"Tiger"}` | age file, 221 bytes: the note |
+| `…` | empty | age file from an outside system |
 
-### boxes: one row for each box
+### `invites`
 
-| Column | Kind | Example | Notes |
+| `id` | `invite_file` | `name_locked` | `expires_at` |
 |---|---|---|---|
-| `id` | Clear | random ID | |
-| `name` | Clear | `Finance 2026` | |
-| `recipient` | Public key | `age1cmaf95n0vkusfv0s…` | The current box public key. It locks new items. |
-| `key_version` | Clear | `1` | Increases each time an admin changes the box key. |
-| `key_history` | **Locked** | empty until the box key changes | Holds old box private keys. The current box private key unlocks it. |
-| `created_by`, `created_at` | Clear | | |
+| `iFhx-052UgwYFJqH7AhiuA` | age file, 320 bytes: the box private key and two names, for the one-time key | age file, 234 bytes: `{"name":"Nok","invitedBy":"Tiger"}` | `1795770000000` |
 
-### memberships: one row for each person in each box
+When Nok opened the link, the server deleted this row.
 
-| Column | Kind | Example | Notes |
-|---|---|---|---|
-| `box_id`, `user_id` | Clear | | Who is in which box. |
-| `role` | Clear | `admin` or `reader` | |
-| `key_copy` | **Locked** | 274 bytes, X25519 stanza | Holds the box private key. The person's member private key unlocks it. |
-| `invited_by`, `joined_at` | Clear | | |
+## What the server can see
 
-### items: one row for each item
-
-| Column | Kind | Example | Notes |
-|---|---|---|---|
-| `id`, `box_id` | Clear | | |
-| `name` | Clear | `note.txt` | **Not locked.** |
-| `ciphertext` | **Locked** | 221 bytes, X25519 stanza | The item. A box private key unlocks it. |
-| `size` | Clear | `221` | The size of the age file. |
-| `added_by`, `source` | Clear | Tiger's ID, `app` | `source` is `ingest:<label>` for items from another system. |
-| `created_at` | Clear | | |
-
-### invites: one row for each invite link
-
-| Column | Kind | Example | Notes |
-|---|---|---|---|
-| `id` | Clear | `n2Wct0b4C-ivqkLH2pCjjw` | The part of the link before `#`. |
-| `box_id`, `label`, `role` | Clear | `Nok, finance`, `reader` | |
-| `invite_file` | **Locked** | 274 bytes, X25519 stanza | Holds the box private key. The one-time private key from the link unlocks it. The server sets it to empty when a person completes the invite or an admin cancels it. |
-| `created_by`, `created_at`, `expires_at` | Clear | | |
-| `used_by`, `used_at` | Clear | Nok's ID | Set by the claim. |
-| `completed_at`, `canceled_at` | Clear | | |
-
-### ingest_tokens: one row for each token for another system
-
-| Column | Kind | Notes |
-|---|---|---|
-| `token_hash` | **Hash** | The app shows the token `sbx_…` one time. The database keeps only its hash. |
-| `box_id`, `label`, `created_by`, `created_at` | Clear | |
-
-## Example: all rows for Tiger, Nok and "Finance 2026"
-
-| Table | Rows | Locked columns |
-|---|---|---|
-| users | Tiger, Nok | none |
-| passkeys | Tiger's passkey, Nok's passkey | 2 envelopes |
-| sessions | 1 or more for each person | none (hashes only) |
-| boxes | Finance 2026, HR 2027 | key history (empty) |
-| memberships | Tiger in Finance (admin), Tiger in HR (admin), Nok in Finance (reader) | 3 key copies |
-| items | note.txt | 1 item |
-| invites | "Nok, finance": completed | invite file deleted |
-
-## Key history: after a member is removed
-
-When an admin removes a member, the box key changes. The server deletes the removed member's key copy. The new box private key goes only to the members who stay.
-
-| Step | Input | Method | Output | Goes to |
-|---|---|---|---|---|
-| 1. Get the old keys | The admin's key copy. The key history, if it exists. | Unlock, as in [scenario 3](03-add-item.md). | The current box private key `AGE-SECRET-KEY-1TECYTY27F3E…` and all older ones. | Step 3 |
-| 2. Make the new box key | Random bytes. | X25519 key generation. | A new box key pair. | Steps 3 and 4 |
-| 3. Lock the old keys | The list of old box private keys, as JSON. The new box public key. | age file with an X25519 stanza. | The new **key history**. | Step 5 |
-| 4. Lock new key copies | The new box private key. The member public key of each member who stays. | age file with an X25519 stanza, one for each member. | New **key copies**. No Face ID is necessary for them. | Step 5 |
-| 5. Keep it all | Steps 3 and 4. The box key version the admin used. | `POST /api/boxes/:id/rotate`. One transaction with a row lock. | The server deletes the removed membership. It keeps the new key copies and the new box public key. It adds 1 to `key_version`. It cancels all open invites. | |
-
-Old items stay locked to the old box key. Members who stay unlock them through the key history. The removed member has no key copy any more, and the server refuses to give them items.
-
-## What is not locked
-
-| Information | Where |
+| The server can see | The server cannot see |
 |---|---|
-| Nicknames | `users.nickname` |
-| Box names | `boxes.name` |
-| Item names, sizes and dates | `items` |
-| Who is in which box, and the role | `memberships` |
-| Invite labels and who used each invite | `invites` |
+| How many boxes, members, items and open invites there are. | Box names, person names, item names, item types. |
+| The size of each age file, so about how large each item is. | The data. |
+| The time of each change. | Who added an item. The label holds this. |
+| Which passkey (credential ID) opens which box. | Which person has which passkey. |
+| The access key, in each request. | Private keys, PRF outputs, passkey public keys. |
+| The IP address of each request. | The part of an invite link after `#`. |
 
-A person with access to the database can read this information. See [document 8](08-security.md).
+**The access key in each request.** The server calculates its hash and then forgets it. But a person who controls the server can record it. With the access key, that person can use the API like a member: get the locked files, delete items, remove members. The access key cannot unlock anything. See [flaw 5](08-security.md#5-the-access-key-works-like-a-password-for-the-box).
+
+## What a database thief gets
+
+A person steals the database or a backup. They get:
+
+- the age files, which they cannot unlock,
+- the box public keys, which can lock but cannot unlock,
+- the hashes, which do not give the keys back,
+- the counts, sizes, times and credential IDs from the table above.
+
+To unlock a box, they also need one of these:
+
+- a member's passkey and Face ID,
+- an unused invite link, and a copy of the database from before somebody used the link,
+- the box private key from a member's browser.
+
+## Old tables in the live database
+
+The first versions of Secretbox had accounts. The live database on Vercel still has their tables (`users`, `passkeys`, `sessions`, `webauthn_flows`, `memberships`, `ingest_tokens`) and some old columns. The new version does not read them. A later cleanup can delete them. See [technical/api-and-sql.md](technical/api-and-sql.md#upgrade-from-the-first-version).
 
 ## Technical details
 
 - [API calls and database statements](technical/api-and-sql.md)
-- [age file format](technical/age-format.md)
 
 [← Previous](06-invite-expired-or-reused.md) · [Next: security flaws and limits →](08-security.md)

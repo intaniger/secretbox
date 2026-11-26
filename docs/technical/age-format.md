@@ -2,7 +2,7 @@
 
 [← All documents](../README.md)
 
-Secretbox locks everything with [age v1](https://age-encryption.org/v1), through the TypeScript library [Typage](https://github.com/FiloSottile/typage). This document shows each part of an age file, with real values. The example is the item `note.txt` from [scenario 3](../03-add-item.md).
+Secretbox locks everything with [age v1](https://age-encryption.org/v1), through the TypeScript library [Typage](https://github.com/FiloSottile/typage). This document shows each part of an age file, with real values. The example is the data file of the note from [scenario 3](../03-add-item.md).
 
 The script [example-data.mjs](example-data.mjs) makes each value by hand with these formulas. Then it verifies that Typage unlocks each file. If a formula here were wrong, the script would fail.
 
@@ -10,21 +10,21 @@ The script [example-data.mjs](example-data.mjs) makes each value by hand with th
 
 | Name | What it does | Used for |
 |---|---|---|
-| X25519 | Makes key pairs. Two parties calculate one shared secret. | Member keys, box keys, one-time keys, temporary keys |
+| X25519 | Makes key pairs. Two parties calculate one shared secret. | Passkey keys, box keys, one-time keys, temporary keys |
 | HKDF-SHA-256 | Makes a new key from a secret, a salt and a label (`info`). | Wrap keys, the header MAC key, the payload key |
-| HMAC-SHA-256 | Makes a check value (MAC) from a key and a message. | The header check |
+| HMAC-SHA-256 | Makes a check value (MAC) from a key and a message. | The header check. Also the access key and the passkey PRF, outside age. |
 | ChaCha20-Poly1305 | Locks data with a 32-byte key and a 12-byte nonce. Adds a 16-byte tag that finds each change. | The stanza body, the payload |
 
 ## Keys
 
-An X25519 private key is 32 random bytes. Its public key is 32 bytes too. age writes them in Bech32 text:
+An X25519 private key is 32 bytes. Its public key is 32 bytes too. age writes them in Bech32 text:
 
 | Key | Bech32 prefix | Example (Finance 2026 box key) | Raw bytes |
 |---|---|---|---|
-| Private key | `AGE-SECRET-KEY-` (upper case) | `AGE-SECRET-KEY-1TECYTY27F3EU674SZFYD4QQVHV6G403U6QE3A2SJU2LYZRKTS82SP5QN4L` | `5e7045915e4c73cd7ab01248da800cbb348abe3cd0331eaa12e2be410ecb81d5` |
-| Public key | `age` | `age1cmaf95n0vkusfv0st6wyqgmqtqknwewmn0p0c8el9n9t30lltsss24fc3d` | `c6fa92d26f65b904b1f05e9c402360582d3765db9bc2fc1f3f2ccab8bfff5c21` |
+| Private key | `AGE-SECRET-KEY-` (upper case) | `AGE-SECRET-KEY-174SLE9SKATLRGWFVVQSPPZXZ2X4M0WEQM4KAEEJ09GKQHFK5FLASM7P3R3` | `f561fc9616eafe34392c60201088c251abb7bb20dd6ddce64f2a2c0ba6d44ffb` |
+| Public key | `age` | `age1aa0rtwwaz8rhsdt243382vx2x7lhf7lscfdtm6tcxhxnsqxl594sg0gwew` | `ef5e35b9dd11c778356aac627530ca37bf74fbf0c25abde97835cd3800dfa16b` |
 
-Secretbox makes them with `age.generateX25519Identity()` and `age.identityToRecipient()`.
+Secretbox makes box keys and one-time keys with `age.generateX25519Identity()`. A passkey key uses the PRF output as the 32 private bytes. See [passkey-prf.md](passkey-prf.md). `age.identityToRecipient()` calculates each public key.
 
 ## The parts of a file
 
@@ -32,7 +32,7 @@ Secretbox makes them with `age.generateX25519Identity()` and `age.identityToReci
 flowchart TD
   subgraph H["Header (text)"]
     V["age-encryption.org/v1"]
-    S["Stanza: -> TYPE ARGUMENTS<br/>body: the file key, locked"]
+    S["Stanza: -> X25519 TEMPORARY-PUBLIC-PART<br/>body: the file key, locked"]
     M["--- MAC"]
   end
   subgraph P["Payload (binary)"]
@@ -42,13 +42,13 @@ flowchart TD
   H --> P
 ```
 
-The item `note.txt`:
+The data file of the note:
 
 ```
 age-encryption.org/v1
--> X25519 /pqZPOaW72Agg6FlpqZc55RhqNRVcUIb5HTZWni73k8
-PCuJa75fjmrNPWOPyy3VF7Ax1WEYf/4Rnz4O5y3LUwY
---- d9K/j0cZ5BhNZu2CDKp+oWbsjo5/KmHEBwjpCGPae8A
+-> X25519 csC1SWy5hBxFb9OHqyOPz+hovpr0HCeFB62jnP/e5jw
+r3k3VpSGco7wucbClUEQy8YF/ZSSOZx6vERXVCEowS0
+--- PWNYy+XB25dDVeCfF+Coqfq8MQ1gjkePnmadGb77IXU
 <16-byte nonce><37 bytes: 21 locked bytes + 16-byte tag>
 ```
 
@@ -58,7 +58,7 @@ Total: 168 bytes of header + 53 bytes of payload = 221 bytes.
 
 ```
 file_key = 16 random bytes
-         = cd1ccd6eaec89e98d4f471bb5df883b1
+         = e6e880992a9faf8cbbfe1da538653f9f
 ```
 
 The browser uses `crypto.getRandomValues`. age makes a new file key for each file. The file key never leaves the browser in the clear.
@@ -68,33 +68,35 @@ The browser uses `crypto.getRandomValues`. age makes a new file key for each fil
 Input: the file key and the recipient's public key. For an item, the recipient is the box public key.
 
 ```
-recipient       = c6fa92d26f65b904b1f05e9c402360582d3765db9bc2fc1f3f2ccab8bfff5c21   (box public key)
+recipient       = ef5e35b9dd11c778356aac627530ca37bf74fbf0c25abde97835cd3800dfa16b   (box public key)
 
 temp_private    = 32 random bytes
-                = 3c5433f533e5a1ec9794138608134c16cab69e9948030616885201536dd831ca
+                = 75318440d7531df1bc58b287f7f6c7021a89f8aef18161b1e19974aa0e5fdd00
 temp_public     = X25519(temp_private, basepoint)
-                = /pqZPOaW72Agg6FlpqZc55RhqNRVcUIb5HTZWni73k8   (base64, in the stanza line)
+                = csC1SWy5hBxFb9OHqyOPz+hovpr0HCeFB62jnP/e5jw   (base64, in the stanza line)
 
 shared_secret   = X25519(temp_private, recipient)
-                = 23d90d44fd1301f3234f1a6826850651826c853bf06841b9cb1ccf4e36dce911
+                = 9ed9b3e7a706e85a4bd38782bcc9e163f51f4b36b5a399f7c90c8cd69f748941
 
 salt            = temp_public || recipient          (64 bytes)
 wrap_key        = HKDF-SHA-256(ikm = shared_secret, salt = salt,
                                info = "age-encryption.org/v1/X25519", length = 32)
-                = 6a4b5f84fc12fa7e5ffaa9753dce1f53f87704b2ed1254bb48e358a271159e36
+                = 7abc12d3c0efe15a771e3f6a35e836a64679b87f270cc242a114c8031099d173
 
 body            = ChaCha20-Poly1305(key = wrap_key, nonce = 12 zero bytes).seal(file_key)
-                = PCuJa75fjmrNPWOPyy3VF7Ax1WEYf/4Rnz4O5y3LUwY   (32 bytes: 16 locked + 16 tag)
+                = r3k3VpSGco7wucbClUEQy8YF/ZSSOZx6vERXVCEowS0   (32 bytes: 16 locked + 16 tag)
 ```
 
 The stanza is two lines:
 
 ```
--> X25519 /pqZPOaW72Agg6FlpqZc55RhqNRVcUIb5HTZWni73k8
-PCuJa75fjmrNPWOPyy3VF7Ax1WEYf/4Rnz4O5y3LUwY
+-> X25519 csC1SWy5hBxFb9OHqyOPz+hovpr0HCeFB62jnP/e5jw
+r3k3VpSGco7wucbClUEQy8YF/ZSSOZx6vERXVCEowS0
 ```
 
 age forgets `temp_private` after this step. A zero nonce is safe here, because each `wrap_key` locks one value only.
+
+The stanza does not hold the recipient public key. So a person who has the file cannot see which public key locked it. Secretbox uses this: the server cannot know a member's passkey public key from their envelope.
 
 ### Unlock the stanza
 
@@ -106,17 +108,17 @@ wrap_key      = HKDF-SHA-256(shared_secret, temp_public || box_public, "age-encr
 file_key      = ChaCha20-Poly1305(wrap_key, zero nonce).open(body)
 ```
 
-If the private key is wrong, the Poly1305 tag check fails. The library then tries the next key. Secretbox gives the current box key and the old box keys from the key history.
+If the private key is wrong, the Poly1305 tag check fails, and the unlock stops with an error.
 
 ## Step 3: the header check (MAC)
 
 ```
 mac_key = HKDF-SHA-256(ikm = file_key, salt = empty, info = "header", length = 32)
-        = 3462dbdb5bdcbccf613fd5cfbb772df025455593f423db29b695bf83f9b1f4a3
+        = 33fce5a30f50df2bba8cba014ef5a83deb1ee4332b3ccfd2bb896d6b67b5253d
 
 message = the header text from "age-encryption.org/v1" up to and including "---"
 mac     = HMAC-SHA-256(mac_key, message)
-        = d9K/j0cZ5BhNZu2CDKp+oWbsjo5/KmHEBwjpCGPae8A   (base64)
+        = PWNYy+XB25dDVeCfF+Coqfq8MQ1gjkePnmadGb77IXU   (base64)
 ```
 
 The last header line is `--- ` and the MAC. When the library unlocks the file, it calculates the MAC again. If a person changed a stanza, the MAC does not agree, and the library stops.
@@ -125,9 +127,9 @@ The last header line is `--- ` and the MAC. When the library unlocks the file, i
 
 ```
 payload_nonce = 16 random bytes
-              = 035cb87a3110c494a6ef28f80a37f813
+              = 70821bbbf211a4ff2bcb692ae6b5d453
 payload_key   = HKDF-SHA-256(ikm = file_key, salt = payload_nonce, info = "payload", length = 32)
-              = af0713c5109785be684b886eb42dd826c0acffd5caa3275b7573141abf721834
+              = 92f2c509e44e6fb6965a543616083cf5c9f4e0797e83f452fbac9bcf0d21003a
 ```
 
 The library cuts the data into chunks of 64 KiB. The last chunk can be smaller. The library locks each chunk separately:
@@ -136,7 +138,7 @@ The library cuts the data into chunks of 64 KiB. The last chunk can be smaller. 
 chunk_nonce = 11-byte chunk counter (big endian, from 0) || 1 byte last-chunk flag (0x01 or 0x00)
             = 000000000000000000000001        (chunk 0, and it is the last chunk)
 chunk       = ChaCha20-Poly1305(payload_key, chunk_nonce).seal("Salary sheet: Nok 50k")
-            = d1cd82a837366fa8a75a7918f47ea621412b3e9c1353c37d6c528ff5660c1e9565e8f92f0d
+            = f563108d5ee6a175f0ff30a8f25f9efc7252c39e83849a15f4ada632eb58c673c485115014
 ```
 
 The counter stops a person who changes the order of chunks. The last-chunk flag stops a person who cuts chunks from the end.
@@ -145,17 +147,19 @@ Size: 16 (nonce) + 21 (data) + 16 (tag) = 53 bytes.
 
 ## How Secretbox uses the format
 
-| File | Stanza type | Recipient | Data in the payload |
-|---|---|---|---|
-| Envelope | `fido2prf` | The person's passkey | The member private key (74 characters) |
-| Key copy | `X25519` | The member public key | The box private key (74 characters) |
-| Item | `X25519` | The box public key | The item data |
-| Invite file | `X25519` | The one-time public key | The box private key |
-| Key history | `X25519` | The current box public key | A JSON list of old box private keys |
+Each file has one X25519 stanza.
 
-The `fido2prf` stanza replaces step 2 only. Steps 1, 3 and 4 are the same. See [passkey-prf.md](passkey-prf.md).
+| File | Recipient (the public key that locks it) | Data in the payload |
+|---|---|---|
+| Envelope | The member's passkey public key | The box private key (74 characters) |
+| Box name file | The box public key | The box name |
+| Member name file | The box public key | `{"name", "invitedBy"}` as JSON |
+| Item label | The box public key | `{"name", "type", "size", "addedBy"}` as JSON |
+| Item data | The box public key | The item |
+| Invite file | The one-time public key | `{"boxKey", "name", "invitedBy"}` as JSON |
+| Invite name file | The box public key | `{"name", "invitedBy"}` as JSON |
 
-Each Secretbox file has one stanza. age can put many stanzas in one file, one for each recipient. Secretbox does not do this for items. It uses the box key instead, so a new member needs only one new key copy, and no item changes.
+age can put many stanzas in one file, one for each recipient. Secretbox does not do this. It locks data to the box key, and gives each member the box private key in their own envelope. So a new member needs only one new envelope, and no item changes.
 
 ## Verify the values yourself
 
