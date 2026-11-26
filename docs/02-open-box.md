@@ -4,17 +4,17 @@
 
 ## In short
 
-Tiger comes back the next day. He selects **Open with passkey**. His phone shows his passkeys, one for each box. He selects "Finance 2026 – Tiger" and uses Face ID. The box opens.
+Tiger comes back the next day. He selects **Open a box with passkey**. His phone shows his passkeys, one for each box. He selects "Finance 2026 – Tiger" and uses Face ID. The box opens.
 
 There is no sign-in. The passkey does not talk to the server. It only gives the key that unlocks Tiger's envelope.
 
 ## What Tiger sees
 
 1. Open Secretbox.
-2. Select **Open with passkey**.
+2. Select **Open a box with passkey**.
 3. The phone shows a list: "Finance 2026 – Tiger", "HR 2027 – Tiger". Select "Finance 2026 – Tiger".
 4. Confirm with Face ID.
-5. The box "Finance 2026" opens, with its items and members.
+5. The box "Finance 2026" opens on the **Items** tab. The members are on the **People** tab.
 
 ## What happens, in plain words
 
@@ -34,7 +34,7 @@ sequenceDiagram
   participant P as Passkey on phone
   participant B as Browser
   participant S as Server
-  T->>B: Open with passkey
+  T->>B: Open a box with passkey
   B->>P: O1. Use a passkey of this site. PRF input
   P->>T: List: Finance 2026 – Tiger, HR 2027 – Tiger
   T->>P: Select Finance 2026 – Tiger, Face ID

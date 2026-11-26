@@ -14,7 +14,7 @@ Mallory finds Nok's link in an old chat. Nok used it before.
 
 1. Open the link. The page says "Somebody invited you to a box".
 2. Select **Open invite**.
-3. The page shows: "This link was already used, has expired, or was canceled."
+3. The page shows "This link no longer works" and the reason: "This link was already used, has expired, or was canceled."
 4. Mallory gets nothing: no box name, no names, no key.
 
 ## What happens, in plain words
