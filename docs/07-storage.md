@@ -49,7 +49,7 @@ In the tables below, **Locked** means "an age file". **Hash** means "a SHA-256 v
 | Column | Kind | Example | Notes |
 |---|---|---|---|
 | `id` | Clear | random ID | 16 random bytes, base64url. |
-| `nickname` | Clear | `Tiger` | The person types it. |
+| `nickname` | Clear | `Tiger` | The account name. The box creator types it. For an invited person, it comes from the first invite. |
 | `webauthn_user_id` | Clear | random ID | The user ID inside the passkey. |
 | `member_recipient` | Public key | `age1gffpl2mrf5g92mje…` | Locks key copies for this person. |
 | `created_at` | Clear | time in milliseconds | |
@@ -78,7 +78,7 @@ In the tables below, **Locked** means "an age file". **Hash** means "a SHA-256 v
 | Column | Kind | Notes |
 |---|---|---|
 | `id`, `challenge` | Clear | A random challenge for one passkey request. |
-| `data` | Clear | The address, the passkey domain and the nickname. |
+| `data` | Clear | The address, the passkey domain and the name. |
 | `expires_at` | Clear | 5 minutes. The server deletes the row when it uses it. |
 
 ### boxes: one row for each box
@@ -88,7 +88,7 @@ In the tables below, **Locked** means "an age file". **Hash** means "a SHA-256 v
 | `id` | Clear | random ID | |
 | `name` | Clear | `Finance 2026` | |
 | `recipient` | Public key | `age1cmaf95n0vkusfv0s…` | The current box public key. It locks new items. |
-| `key_version` | Clear | `1` | Increases each time an admin changes the box key. |
+| `key_version` | Clear | `1` | Increases each time a member changes the box key. |
 | `key_history` | **Locked** | empty until the box key changes | Holds old box private keys. The current box private key unlocks it. |
 | `created_by`, `created_at` | Clear | | |
 
@@ -97,7 +97,7 @@ In the tables below, **Locked** means "an age file". **Hash** means "a SHA-256 v
 | Column | Kind | Example | Notes |
 |---|---|---|---|
 | `box_id`, `user_id` | Clear | | Who is in which box. |
-| `role` | Clear | `admin` or `reader` | |
+| `name` | Clear | `Nok` | How the person appears in this box. The person who invited them typed it. |
 | `key_copy` | **Locked** | 274 bytes, X25519 stanza | Holds the box private key. The person's member private key unlocks it. |
 | `invited_by`, `joined_at` | Clear | | |
 
@@ -117,8 +117,8 @@ In the tables below, **Locked** means "an age file". **Hash** means "a SHA-256 v
 | Column | Kind | Example | Notes |
 |---|---|---|---|
 | `id` | Clear | `n2Wct0b4C-ivqkLH2pCjjw` | The part of the link before `#`. |
-| `box_id`, `label`, `role` | Clear | `Nok, finance`, `reader` | |
-| `invite_file` | **Locked** | 274 bytes, X25519 stanza | Holds the box private key. The one-time private key from the link unlocks it. The server sets it to empty when a person completes the invite or an admin cancels it. |
+| `box_id`, `name` | Clear | `Nok` | The name of the invited person. |
+| `invite_file` | **Locked** | 274 bytes, X25519 stanza | Holds the box private key. The one-time private key from the link unlocks it. The server sets it to empty when a person completes the invite or a member cancels it. |
 | `created_by`, `created_at`, `expires_at` | Clear | | |
 | `used_by`, `used_at` | Clear | Nok's ID | Set by the claim. |
 | `completed_at`, `canceled_at` | Clear | | |
@@ -138,21 +138,21 @@ In the tables below, **Locked** means "an age file". **Hash** means "a SHA-256 v
 | passkeys | Tiger's passkey, Nok's passkey | 2 envelopes |
 | sessions | 1 or more for each person | none (hashes only) |
 | boxes | Finance 2026, HR 2027 | key history (empty) |
-| memberships | Tiger in Finance (admin), Tiger in HR (admin), Nok in Finance (reader) | 3 key copies |
+| memberships | Tiger in Finance, Tiger in HR, Nok in Finance (invited by Tiger) | 3 key copies |
 | items | note.txt | 1 item |
-| invites | "Nok, finance": completed | invite file deleted |
+| invites | "Nok": completed | invite file deleted |
 
 ## Key history: after a member is removed
 
-When an admin removes a member, the box key changes. The server deletes the removed member's key copy. The new box private key goes only to the members who stay.
+When a member removes another member, the box key changes. The server deletes the removed member's key copy. The new box private key goes only to the members who stay.
 
 | Step | Input | Method | Output | Goes to |
 |---|---|---|---|---|
-| 1. Get the old keys | The admin's key copy. The key history, if it exists. | Unlock, as in [scenario 3](03-add-item.md). | The current box private key `AGE-SECRET-KEY-1TECYTY27F3E…` and all older ones. | Step 3 |
+| 1. Get the old keys | The key copy of the member who removes. The key history, if it exists. | Unlock, as in [scenario 3](03-add-item.md). | The current box private key `AGE-SECRET-KEY-1TECYTY27F3E…` and all older ones. | Step 3 |
 | 2. Make the new box key | Random bytes. | X25519 key generation. | A new box key pair. | Steps 3 and 4 |
 | 3. Lock the old keys | The list of old box private keys, as JSON. The new box public key. | age file with an X25519 stanza. | The new **key history**. | Step 5 |
 | 4. Lock new key copies | The new box private key. The member public key of each member who stays. | age file with an X25519 stanza, one for each member. | New **key copies**. No Face ID is necessary for them. | Step 5 |
-| 5. Keep it all | Steps 3 and 4. The box key version the admin used. | `POST /api/boxes/:id/rotate`. One transaction with a row lock. | The server deletes the removed membership. It keeps the new key copies and the new box public key. It adds 1 to `key_version`. It cancels all open invites. | |
+| 5. Keep it all | Steps 3 and 4. The box key version that the browser used. | `POST /api/boxes/:id/rotate`. One transaction with a row lock. | The server deletes the removed membership. It keeps the new key copies and the new box public key. It adds 1 to `key_version`. It cancels all open invites. | |
 
 Old items stay locked to the old box key. Members who stay unlock them through the key history. The removed member has no key copy any more, and the server refuses to give them items.
 
@@ -160,11 +160,11 @@ Old items stay locked to the old box key. Members who stay unlock them through t
 
 | Information | Where |
 |---|---|
-| Nicknames | `users.nickname` |
+| Names | `users.nickname`, `memberships.name`, `invites.name` |
 | Box names | `boxes.name` |
 | Item names, sizes and dates | `items` |
-| Who is in which box, and the role | `memberships` |
-| Invite labels and who used each invite | `invites` |
+| Who is in which box, and who invited whom | `memberships` |
+| Invite names and who used each invite | `invites` |
 
 A person with access to the database can read this information. See [document 8](08-security.md).
 

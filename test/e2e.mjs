@@ -122,23 +122,30 @@ async function person(name) {
   return p;
 }
 
-async function createInvite(admin, label, role = "reader") {
-  await admin.type("[data-test=invite-label]", label);
-  await admin.page.select("[data-test=invite-role]", role);
-  await admin.page.$eval("[data-test=invite-link]", (el) => el.remove()).catch(() => {});
-  await admin.click("[data-test=create-invite]");
-  await admin.page.waitForSelector("[data-test=invite-link]");
-  return admin.page.$eval("[data-test=invite-link]", (el) => el.value);
+/** Any member can invite. The inviter types the name; there is no role. */
+async function createInvite(member, name) {
+  await member.type("[data-test=invite-name]", name);
+  await member.page.$eval("[data-test=invite-link]", (el) => el.remove()).catch(() => {});
+  await member.click("[data-test=create-invite]");
+  await member.page.waitForSelector("[data-test=invite-link]");
+  return member.page.$eval("[data-test=invite-link]", (el) => el.value);
 }
 
-async function joinWith(p, link, nickname) {
+/** The invited person types nothing: the name comes from the invite. */
+async function joinWith(p, link, expectedName) {
   await p.goto(link);
   await p.waitText("invited you");
-  await shot(p, `3-join-${nickname}.png`);
-  await p.type("[data-test=nickname]", nickname);
+  assert.equal(await p.text("[data-test=invite-as]"), `You will appear as ${expectedName} in this box.`);
+  assert.equal(await p.page.$("input"), null, "the join page should have no fields to fill in");
+  await shot(p, `3-join-${expectedName}.png`);
   await p.click("[data-test=accept]");
   await p.page.waitForSelector("[data-test=box-title]", { timeout: 20000 });
 }
+
+/** The text of the member row for this name. */
+const memberRow = (p, name) =>
+  p.page.evaluate((n) => [...document.querySelectorAll("[data-test=member]")]
+    .find((li) => li.querySelector(".row-main")?.textContent.startsWith(n))?.innerText ?? null, name);
 
 // --- The journey -----------------------------------------------------------------
 
@@ -164,27 +171,29 @@ try {
   assert.equal(tiger.total(), 2, "adding data should need no passkey prompt");
   log("Tiger adds a note (0 prompts, locked in the browser)");
 
-  const nokLink = await createInvite(tiger, "Nok, finance");
-  await shot(tiger, "2-admin-invite.png");
-  const beeLink = await createInvite(tiger, "Bee, audit");
+  const nokLink = await createInvite(tiger, "Nok");
+  await shot(tiger, "2-invite.png");
   const spareLink = await createInvite(tiger, "Spare");
   assert.match(nokLink, new RegExp(`^${BASE}/join/[\\w-]+#AGE-SECRET-KEY-1[0-9A-Z]+$`));
-  log("Tiger makes 3 invite links (one-time key after #)");
+  log("Tiger makes 2 invite links, typing only a name (one-time key after #)");
+
+  // A link preview bot fetches the page and the public invite info: nothing changes.
+  const preview = await fetch(nokLink.split("#")[0]);
+  assert.equal(preview.status, 200);
+  const info = await (await fetch(`${BASE}/api/invites/${nokLink.split("/join/")[1].split("#")[0]}`)).json();
+  assert.equal(info.status, "open");
+  assert.equal(info.name, "Nok");
+  assert.equal(info.role, undefined, "invites have no role");
+  log("A link preview (GET) does not use up the invite");
 
   const nok = await person("Nok");
   await joinWith(nok, nokLink, "Nok");
   assert.equal(nok.total(), 2, "joining should take exactly 2 passkey prompts");
   assert.ok(!nok.page.url().includes("#"), "the one-time key should be removed from the URL");
   assert.equal(await nok.open("note.txt"), "Salary sheet: Nok 50k");
-  await shot(nok, "4-reader-box.png");
-  log("Nok joins with the link (2 prompts) and reads the note");
-
-  // A link preview bot fetches the page and the public invite info: nothing changes.
-  const preview = await fetch(beeLink.split("#")[0]);
-  assert.equal(preview.status, 200);
-  const info = await (await fetch(`${BASE}/api/invites/${beeLink.split("/join/")[1].split("#")[0]}`)).json();
-  assert.equal(info.status, "open");
-  log("A link preview (GET) does not use up the invite");
+  assert.match(await memberRow(nok, "Nok"), /invited by Tiger/);
+  await shot(nok, "4-member-box.png");
+  log("Nok joins without typing anything (2 prompts), appears as 'Nok', reads the note");
 
   const mallory = await person("Mallory");
   await mallory.goto(nokLink);
@@ -192,9 +201,21 @@ try {
   await shot(mallory, "5-link-used.png");
   log("Mallory opens Nok's link again: 'already used'");
 
+  // No roles: Nok can add data and invite people herself.
+  await nok.type("[data-test=note-name]", "nok.txt");
+  await nok.type("[data-test=note-text]", "Added by Nok");
+  await nok.click("[data-test=add-note]");
+  await nok.waitText("nok.txt");
+  const promptsBeforeInvite = nok.total();
+  const beeLink = await createInvite(nok, "Bee");
+  assert.equal(nok.total() - promptsBeforeInvite, 0, "Nok's box is unlocked, so inviting needs no prompt");
+  log("Nok adds a note and invites Bee herself (no roles)");
+
   const bee = await person("Bee");
   await joinWith(bee, beeLink, "Bee");
-  log("Bee joins with her own link");
+  assert.match(await memberRow(bee, "Bee"), /invited by Nok/);
+  assert.equal(await bee.open("nok.txt"), "Added by Nok");
+  log("Bee joins with Nok's link and shows as 'invited by Nok'");
 
   // --- Outside system adds data with only the public key + a token
   await tiger.type("[data-test=token-label]", "Google Form");

@@ -77,10 +77,11 @@ CREATE TABLE IF NOT EXISTS boxes (
   created_at  BIGINT NOT NULL
 );
 
+-- There are no roles: every member can read, add, invite and remove.
 CREATE TABLE IF NOT EXISTS memberships (
   box_id     TEXT NOT NULL REFERENCES boxes(id) ON DELETE CASCADE,
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role       TEXT NOT NULL CHECK (role IN ('admin', 'reader')),
+  name       TEXT,                    -- how this person appears in this box (typed by whoever invited them)
   key_copy   BYTEA NOT NULL,          -- age file: box identity, locked to the member key
   invited_by TEXT,
   joined_at  BIGINT NOT NULL,
@@ -103,8 +104,7 @@ CREATE INDEX IF NOT EXISTS items_box ON items (box_id);
 CREATE TABLE IF NOT EXISTS invites (
   id           TEXT PRIMARY KEY,
   box_id       TEXT NOT NULL REFERENCES boxes(id) ON DELETE CASCADE,
-  label        TEXT NOT NULL,
-  role         TEXT NOT NULL CHECK (role IN ('admin', 'reader')),
+  name         TEXT,                  -- the invited person's name, typed by the person who invites
   invite_file  BYTEA,                 -- age file: box identity, locked to a one-time key; NULL once done
   created_by   TEXT NOT NULL REFERENCES users(id),
   created_at   BIGINT NOT NULL,
@@ -123,6 +123,29 @@ CREATE TABLE IF NOT EXISTS ingest_tokens (
   created_by TEXT NOT NULL REFERENCES users(id),
   created_at BIGINT NOT NULL
 );
+
+-- Upgrade a database made by the first version, which had roles and invite
+-- labels. The changes only add, fill or relax columns, so an older deployment
+-- that shares the database keeps working.
+ALTER TABLE memberships ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE invites ADD COLUMN IF NOT EXISTS name TEXT;
+UPDATE memberships m SET name = u.nickname FROM users u WHERE m.user_id = u.id AND m.name IS NULL;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = 'memberships' AND column_name = 'role') THEN
+    ALTER TABLE memberships ALTER COLUMN role DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = 'invites' AND column_name = 'role') THEN
+    ALTER TABLE invites ALTER COLUMN role DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = 'invites' AND column_name = 'label') THEN
+    ALTER TABLE invites ALTER COLUMN label DROP NOT NULL;
+    EXECUTE 'UPDATE invites SET name = label WHERE name IS NULL';
+  END IF;
+END $$;
 `;
 
 /** Creates the tables if needed. The advisory lock stops two cold starts racing. */

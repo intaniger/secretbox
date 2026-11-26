@@ -40,7 +40,7 @@ sequenceDiagram
   M->>B: Open the used link
   Note over B: Keep the one-time private key in memory
   B->>S: GET /api/invites/ID
-  S-->>B: Status used, box name, inviter, role
+  S-->>B: Status used, box name, inviter, name
   B-->>M: This invite was already used
 ```
 
@@ -74,7 +74,7 @@ The server calculates the status in this order:
 | Step | Input | Method | Output | Goes to |
 |---|---|---|---|---|
 | 1. Read the link | The link `…/join/n2Wct0b4C-ivqkLH2pCjjw#AGE-SECRET-KEY-1ZQYRVJWHT7S…` | The browser reads the part after `#`. | The one-time private key, in memory only. | Not used |
-| 2. Get the status | The invite ID. | `GET /api/invites/:id`. No sign-in is necessary. Nothing changes. | Box name "Finance 2026". Inviter "Tiger". Label "Nok, finance". Role "reader". Status "used". | Step 3 |
+| 2. Get the status | The invite ID. | `GET /api/invites/:id`. No sign-in is necessary. Nothing changes. | Box name "Finance 2026". Inviter "Tiger". Name "Nok". Status "used". | Step 3 |
 | 3. Decide | The status. | The page compares it with "open". | A message. No **Accept** button. | |
 
 ### If Mallory sends the claim herself
@@ -94,7 +94,7 @@ Mallory can make an account and call the API directly, without the page. The ser
 | used, completed | The person finished joining. | **Deleted** | No |
 | used, not completed | The person claimed, but the join stopped before step 9 of [scenario 5](05-use-invite.md). | **Kept** | The server allows only that same person. But the page shows "already used", so that person cannot finish through the page. This is a flaw. |
 | expired | The time limit passed before anybody used it. | **Kept** | No. This is a flaw: the server should delete the file. |
-| canceled | An admin canceled it, or an admin changed the box key. | **Deleted** | No |
+| canceled | A member canceled it, or a member changed the box key. | **Deleted** | No |
 
 ## What stays in the database
 
@@ -115,11 +115,11 @@ A person who has both gets the box private key of that time. With it, the person
 
 The page and the API cannot give the invite file to such a person. The danger is only for a person with access to the database or its backups.
 
-## What Tiger sees
+## What the members see
 
-In the box page, under **Invites**, Tiger sees each invite with its status and who used it. For example: "Nok, finance · used · used by Nok".
+In the box page, under **Invites**, each member sees each invite: the name, the status and who made it. For example: "Nok · used · by Tiger". Under **Members**, each member shows who invited them.
 
-If the wrong person used a link, Tiger can remove that person. This changes the box key. See [document 7](07-storage.md#key-history-after-a-member-is-removed).
+If the wrong person used a link, any member can remove that person. This changes the box key. See [document 7](07-storage.md#key-history-after-a-member-is-removed).
 
 ## A link that leaks before it is used
 

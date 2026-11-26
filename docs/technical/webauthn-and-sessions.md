@@ -17,7 +17,7 @@ sequenceDiagram
   participant P as Passkey
   participant S as Server
   participant D as Database
-  B->>S: POST /api/register/options, nickname
+  B->>S: POST /api/register/options, name
   Note over S: Check the Origin header. Passkey domain = host of the origin
   S->>D: INSERT webauthn_flows, challenge, 5 minutes
   S-->>B: flowId and options
@@ -39,7 +39,7 @@ sequenceDiagram
 | `rp.id` | The host of the request origin, for example `secretbox-nu.vercel.app` | The passkey works only on this domain. |
 | `rp.name` | `Secretbox` | The phone shows it. |
 | `user.id` | 32 random bytes | Not the email or the name. |
-| `user.name` | The nickname | The phone shows it. |
+| `user.name` | The person's name. The box creator types it. For an invited person, it comes from the invite. | The phone shows it. |
 | `challenge` | 32 random bytes | The server keeps it in `webauthn_flows` for 5 minutes. |
 | `authenticatorSelection.residentKey` | `required` | A discoverable passkey. Sign-in needs no user name. |
 | `authenticatorSelection.userVerification` | `required` | Face ID, fingerprint or PIN each time. PRF also requires it. |

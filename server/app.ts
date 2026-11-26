@@ -120,17 +120,14 @@ export function createApp(db: Db, opts: AppOptions): Hono {
     return { userId: s!.user_id, passkeyId: s!.passkey_id };
   }
 
+  /** There are no roles: every member of a box can do everything in it. */
   async function membership(boxId: string, userId: string, q: Queryable = db): Promise<Row> {
-    const m = await q.one("SELECT role, key_copy FROM memberships WHERE box_id = ? AND user_id = ?", boxId, userId);
+    const m = await q.one("SELECT key_copy FROM memberships WHERE box_id = ? AND user_id = ?", boxId, userId);
     if (!m) bad("You are not a member of this box", 403);
     return m!;
   }
 
-  async function requireAdmin(boxId: string, userId: string, q: Queryable = db): Promise<Row> {
-    const m = await membership(boxId, userId, q);
-    if (m.role !== "admin") bad("Only admins can do this", 403);
-    return m;
-  }
+  const inviteName = (inv: Row): string => inv.name ?? "";
 
   app.onError((err, c) => {
     if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
@@ -152,7 +149,7 @@ export function createApp(db: Db, opts: AppOptions): Hono {
   app.post("/api/register/options", async (c) => {
     const { origin, rpID } = relyingParty(c);
     const { nickname } = await c.req.json();
-    if (typeof nickname !== "string" || !nickname.trim() || nickname.length > 60) bad("Nickname is required");
+    if (typeof nickname !== "string" || !nickname.trim() || nickname.length > 60) bad("A name is required");
     const options = await generateRegistrationOptions({
       rpName,
       rpID,
@@ -287,7 +284,7 @@ export function createApp(db: Db, opts: AppOptions): Hono {
   app.get("/api/boxes", async (c) => {
     const { userId } = await auth(c);
     const boxes = await db.all(
-      `SELECT b.id, b.name, m.role,
+      `SELECT b.id, b.name,
          (SELECT COUNT(*) FROM items i WHERE i.box_id = b.id) AS item_count,
          (SELECT COUNT(*) FROM memberships x WHERE x.box_id = b.id) AS member_count
        FROM boxes b JOIN memberships m ON m.box_id = b.id
@@ -303,7 +300,7 @@ export function createApp(db: Db, opts: AppOptions): Hono {
     if (typeof name !== "string" || !name.trim() || name.length > 100) bad("Box name is required");
     if (!isRecipient(recipient)) bad("recipient must be an age1... recipient");
     const copy = fromB64(keyCopy, "keyCopy");
-    const u = (await db.one("SELECT member_recipient FROM users WHERE id = ?", userId))!;
+    const u = (await db.one("SELECT nickname, member_recipient FROM users WHERE id = ?", userId))!;
     if (!u.member_recipient) bad("Set up your member key first", 409);
     const id = newId();
     await db.tx(async (q) => {
@@ -312,8 +309,8 @@ export function createApp(db: Db, opts: AppOptions): Hono {
         id, name.trim(), recipient, userId, now(),
       );
       await q.run(
-        "INSERT INTO memberships (box_id, user_id, role, key_copy, joined_at) VALUES (?, ?, 'admin', ?, ?)",
-        id, userId, copy, now(),
+        "INSERT INTO memberships (box_id, user_id, name, key_copy, joined_at) VALUES (?, ?, ?, ?, ?)",
+        id, userId, u.nickname, copy, now(),
       );
     });
     return c.json({ id });
@@ -324,11 +321,16 @@ export function createApp(db: Db, opts: AppOptions): Hono {
     const boxId = c.req.param("id");
     const me = await membership(boxId, userId);
     const box = (await db.one("SELECT * FROM boxes WHERE id = ?", boxId))!;
-    const isAdmin = me.role === "admin";
+    // A member's name in this box, with the account name as a fallback for older rows.
+    const nameIn = (m: string, u: string) => `COALESCE(${m}.name, ${u}.nickname)`;
     const [members, items, invites, ingestTokens] = await Promise.all([
       db.all(
-        `SELECT u.id AS "userId", u.nickname, u.member_recipient AS recipient, m.role, m.joined_at AS "joinedAt"
-         FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.box_id = ? ORDER BY m.joined_at`,
+        `SELECT u.id AS "userId", ${nameIn("m", "u")} AS name, u.member_recipient AS recipient,
+           m.joined_at AS "joinedAt", ${nameIn("im", "iu")} AS "invitedBy"
+         FROM memberships m JOIN users u ON u.id = m.user_id
+         LEFT JOIN memberships im ON im.box_id = m.box_id AND im.user_id = m.invited_by
+         LEFT JOIN users iu ON iu.id = m.invited_by
+         WHERE m.box_id = ? ORDER BY m.joined_at`,
         boxId,
       ),
       db.all(
@@ -336,18 +338,15 @@ export function createApp(db: Db, opts: AppOptions): Hono {
          FROM items i LEFT JOIN users u ON u.id = i.added_by WHERE i.box_id = ? ORDER BY i.created_at DESC`,
         boxId,
       ),
-      isAdmin
-        ? db.all(
-            `SELECT i.id, i.label, i.role, i.expires_at, i.created_at, i.used_by, i.completed_at, i.canceled_at,
-               u.nickname AS used_by_name
-             FROM invites i LEFT JOIN users u ON u.id = i.used_by
-             WHERE i.box_id = ? ORDER BY i.created_at DESC LIMIT 50`,
-            boxId,
-          )
-        : [],
-      isAdmin
-        ? db.all(`SELECT label, created_at AS "createdAt" FROM ingest_tokens WHERE box_id = ? ORDER BY created_at`, boxId)
-        : [],
+      db.all(
+        `SELECT i.*, ${nameIn("cm", "cu")} AS created_by_name
+         FROM invites i
+         LEFT JOIN memberships cm ON cm.box_id = i.box_id AND cm.user_id = i.created_by
+         LEFT JOIN users cu ON cu.id = i.created_by
+         WHERE i.box_id = ? ORDER BY i.created_at DESC LIMIT 50`,
+        boxId,
+      ),
+      db.all(`SELECT label, created_at AS "createdAt" FROM ingest_tokens WHERE box_id = ? ORDER BY created_at`, boxId),
     ]);
     return c.json({
       box: {
@@ -357,12 +356,12 @@ export function createApp(db: Db, opts: AppOptions): Hono {
         keyVersion: box.key_version,
         keyHistory: toB64(box.key_history),
       },
-      me: { userId, role: me.role, keyCopy: toB64(me.key_copy) },
+      me: { userId, keyCopy: toB64(me.key_copy) },
       members,
       items,
       invites: invites.map((i) => ({
-        id: i.id, label: i.label, role: i.role, status: inviteStatus(i),
-        expiresAt: i.expires_at, usedBy: i.used_by_name, createdAt: i.created_at,
+        id: i.id, name: inviteName(i), status: inviteStatus(i), invitedBy: i.created_by_name,
+        expiresAt: i.expires_at, createdAt: i.created_at,
       })),
       ingestTokens,
     });
@@ -398,7 +397,7 @@ export function createApp(db: Db, opts: AppOptions): Hono {
   app.post("/api/boxes/:id/items", limit, async (c) => {
     const { userId } = await auth(c);
     const boxId = c.req.param("id");
-    await requireAdmin(boxId, userId);
+    await membership(boxId, userId);
     const body = new Uint8Array(await c.req.arrayBuffer());
     return c.json({ id: await storeItem(boxId, c.req.query("name") ?? "", body, userId, "app") });
   });
@@ -418,7 +417,7 @@ export function createApp(db: Db, opts: AppOptions): Hono {
   app.delete("/api/boxes/:id/items/:itemId", async (c) => {
     const { userId } = await auth(c);
     const boxId = c.req.param("id");
-    await requireAdmin(boxId, userId);
+    await membership(boxId, userId);
     await db.run("DELETE FROM items WHERE id = ? AND box_id = ?", c.req.param("itemId"), boxId);
     return c.json({ ok: true });
   });
@@ -428,7 +427,7 @@ export function createApp(db: Db, opts: AppOptions): Hono {
   app.post("/api/boxes/:id/ingest-tokens", async (c) => {
     const { userId } = await auth(c);
     const boxId = c.req.param("id");
-    await requireAdmin(boxId, userId);
+    await membership(boxId, userId);
     const { label } = await c.req.json();
     if (typeof label !== "string" || !label.trim()) bad("label is required");
     const token = `sbx_${newId(24)}`;
@@ -454,10 +453,9 @@ export function createApp(db: Db, opts: AppOptions): Hono {
   app.post("/api/boxes/:id/invites", async (c) => {
     const { userId } = await auth(c);
     const boxId = c.req.param("id");
-    await requireAdmin(boxId, userId);
-    const { label, role, inviteFile, ttlHours, keyVersion } = await c.req.json();
-    if (typeof label !== "string" || !label.trim() || label.length > 100) bad("label is required");
-    if (role !== "reader" && role !== "admin") bad("role must be reader or admin");
+    await membership(boxId, userId);
+    const { name, inviteFile, ttlHours, keyVersion } = await c.req.json();
+    if (typeof name !== "string" || !name.trim() || name.length > 60) bad("Type the name of the person you invite");
     const file = fromB64(inviteFile, "inviteFile");
     const hours = Math.min(Math.max(Number(ttlHours) || 24, 1), MAX_INVITE_TTL_HOURS);
     const id = newId();
@@ -467,9 +465,9 @@ export function createApp(db: Db, opts: AppOptions): Hono {
       const box = await q.one("SELECT key_version FROM boxes WHERE id = ? FOR SHARE", boxId);
       if (box?.key_version !== keyVersion) bad("The box key changed. Reload and try again.", 409);
       await q.run(
-        `INSERT INTO invites (id, box_id, label, role, invite_file, created_by, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        id, boxId, label.trim(), role, file, userId, now(), now() + hours * 3600 * 1000,
+        `INSERT INTO invites (id, box_id, name, invite_file, created_by, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        id, boxId, name.trim(), file, userId, now(), now() + hours * 3600 * 1000,
       );
     });
     return c.json({ id });
@@ -478,7 +476,7 @@ export function createApp(db: Db, opts: AppOptions): Hono {
   app.delete("/api/boxes/:id/invites/:inviteId", async (c) => {
     const { userId } = await auth(c);
     const boxId = c.req.param("id");
-    await requireAdmin(boxId, userId);
+    await membership(boxId, userId);
     await db.run(
       "UPDATE invites SET canceled_at = ?, invite_file = NULL WHERE id = ? AND box_id = ? AND completed_at IS NULL",
       now(), c.req.param("inviteId"), boxId,
@@ -490,14 +488,16 @@ export function createApp(db: Db, opts: AppOptions): Hono {
   // state, so link previews (LINE, Slack, iMessage) can't burn the invite.
   app.get("/api/invites/:id", async (c) => {
     const inv = await db.one(
-      `SELECT i.box_id, i.label, i.role, i.expires_at, i.used_by, i.completed_at, i.canceled_at,
-         b.name AS box_name, u.nickname AS invited_by
-       FROM invites i JOIN boxes b ON b.id = i.box_id JOIN users u ON u.id = i.created_by WHERE i.id = ?`,
+      `SELECT i.box_id, i.name, i.expires_at, i.used_by, i.completed_at, i.canceled_at,
+         b.name AS box_name, COALESCE(cm.name, u.nickname) AS invited_by
+       FROM invites i JOIN boxes b ON b.id = i.box_id JOIN users u ON u.id = i.created_by
+       LEFT JOIN memberships cm ON cm.box_id = i.box_id AND cm.user_id = i.created_by
+       WHERE i.id = ?`,
       c.req.param("id"),
     );
     if (!inv) bad("Invite not found", 404);
     return c.json({
-      boxId: inv!.box_id, boxName: inv!.box_name, label: inv!.label, role: inv!.role,
+      boxId: inv!.box_id, boxName: inv!.box_name, name: inviteName(inv!),
       invitedBy: inv!.invited_by, status: inviteStatus(inv!), expiresAt: inv!.expires_at,
     });
   });
@@ -530,7 +530,7 @@ export function createApp(db: Db, opts: AppOptions): Hono {
         410,
       );
     }
-    return c.json({ boxId: fresh.box_id, role: fresh.role, inviteFile: toB64(fresh.invite_file) });
+    return c.json({ boxId: fresh.box_id, inviteFile: toB64(fresh.invite_file) });
   });
 
   // Step 2 of joining: the browser re-locked the box key to the new member key.
@@ -543,13 +543,13 @@ export function createApp(db: Db, opts: AppOptions): Hono {
       const inv = await q.one(
         `UPDATE invites SET completed_at = ?, invite_file = NULL
          WHERE id = ? AND used_by = ? AND completed_at IS NULL AND canceled_at IS NULL
-         RETURNING box_id, role, created_by`,
+         RETURNING box_id, name, created_by`,
         now(), id, userId,
       );
       if (!inv) bad("This invite can't be completed. It may have been canceled.", 410);
       await q.run(
-        "INSERT INTO memberships (box_id, user_id, role, key_copy, invited_by, joined_at) VALUES (?, ?, ?, ?, ?, ?)",
-        inv!.box_id, userId, inv!.role, copy, inv!.created_by, now(),
+        "INSERT INTO memberships (box_id, user_id, name, key_copy, invited_by, joined_at) VALUES (?, ?, ?, ?, ?, ?)",
+        inv!.box_id, userId, inviteName(inv!), copy, inv!.created_by, now(),
       );
       return inv!.box_id as string;
     });
@@ -572,10 +572,10 @@ export function createApp(db: Db, opts: AppOptions): Hono {
     );
 
     const keyVersion = await db.tx(async (q) => {
-      // Lock the box row so two admins can't change the key at the same time.
+      // Lock the box row so two members can't change the key at the same time.
       const box = await q.one("SELECT key_version FROM boxes WHERE id = ? FOR UPDATE", boxId);
       if (!box) bad("Not found", 404);
-      await requireAdmin(boxId, userId, q);
+      await membership(boxId, userId, q);
       if (expectedKeyVersion !== box!.key_version) bad("The box key changed. Reload and try again.", 409);
 
       const members = (await q.all("SELECT user_id FROM memberships WHERE box_id = ?", boxId)).map((m) => m.user_id as string);

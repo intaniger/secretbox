@@ -45,23 +45,23 @@ export type Me = {
   passkey: { id: string; transports: string[]; hasEnvelope: boolean };
 };
 
-export type BoxSummary = { id: string; name: string; role: Role; item_count: number; member_count: number };
-export type Role = "admin" | "reader";
+export type BoxSummary = { id: string; name: string; item_count: number; member_count: number };
 
 export type BoxDetail = {
   box: { id: string; name: string; recipient: string; keyVersion: number; keyHistory: string | null };
-  me: { userId: string; role: Role; keyCopy: string };
-  members: { userId: string; nickname: string; recipient: string; role: Role; joinedAt: number }[];
+  me: { userId: string; keyCopy: string };
+  /** `name` is how the person appears in this box. `invitedBy` is null for the person who made the box. */
+  members: { userId: string; name: string; recipient: string; joinedAt: number; invitedBy: string | null }[];
   items: { id: string; name: string; size: number; source: string; createdAt: number; addedBy: string | null }[];
-  invites: { id: string; label: string; role: Role; status: string; expiresAt: number; usedBy: string | null }[];
+  invites: { id: string; name: string; status: string; invitedBy: string | null; expiresAt: number }[];
   ingestTokens: { label: string; createdAt: number }[];
 };
 
 export type InviteInfo = {
   boxId: string;
   boxName: string;
-  label: string;
-  role: Role;
+  /** The invited person's name, typed by the person who made the invite. */
+  name: string;
   invitedBy: string;
   status: "open" | "used" | "expired" | "canceled";
   expiresAt: number;

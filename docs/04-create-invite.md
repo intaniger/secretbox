@@ -1,10 +1,12 @@
-# 4. An admin makes an invite link
+# 4. A member makes an invite link
 
 [← All documents](README.md) · [Word list](README.md#the-words-in-these-documents)
 
 ## In short
 
-Tiger wants Nok to read "Finance 2026". He makes an invite link and sends it to her in a private chat.
+Tiger wants Nok in "Finance 2026". He makes an invite link and sends it to her in a private chat.
+
+Any member can make an invite link. There are no roles: Nok can later invite other people too. The person who invites types the name of the new member. The new member does not type a name.
 
 The link holds a **one-time private key** after the `#` sign. The server holds an **invite file**: a copy of the box private key, locked to the matching one-time public key. The link and the invite file are useless alone. Together, they give the box private key.
 
@@ -13,8 +15,8 @@ Browsers never send the part after `#` to a server. So the server never gets the
 ## What Tiger sees
 
 1. Open the box "Finance 2026".
-2. Under **Invite someone**, type who the invite is for ("Nok, finance").
-3. Select the role (**Reader**) and the time limit (**24 hours**).
+2. Under **Invite someone**, type the name of the person ("Nok"). This name shows in the box.
+3. Select the time limit (**24 hours**).
 4. Select **Create invite link**.
 5. If the box is locked, confirm with Face ID.
 6. Copy the link. Send it to Nok in a private chat.
@@ -26,7 +28,7 @@ Browsers never send the part after `#` to a server. So the server never gets the
 1. The browser gets the box private key. It unlocks Tiger's envelope (Face ID, if locked) and then his key copy.
 2. The browser makes a one-time key pair.
 3. The one-time public key locks a copy of the box private key. The result is the **invite file**.
-4. The server keeps the invite file, the label, the role and the time limit. It gives back an invite ID.
+4. The server keeps the invite file, the name and the time limit. It gives back an invite ID.
 5. The browser puts the invite ID and the one-time private key in the link.
 
 ## Who talks to whom
@@ -37,7 +39,7 @@ sequenceDiagram
   participant B as Browser
   participant P as Passkey on phone
   participant S as Server
-  T->>B: Label, role, time limit, Create invite link
+  T->>B: Name, time limit, Create invite link
   opt Box is locked
     B->>S: GET /api/me/envelope
     B->>P: PRF request
@@ -46,7 +48,7 @@ sequenceDiagram
   end
   Note over B: Unlock key copy to get the box private key
   Note over B: Make one-time key pair. Lock box private key to the one-time public key
-  B->>S: Invite file, label, role, time limit, box key version
+  B->>S: Invite file, name, time limit, box key version
   Note over S: Check the key version. Keep the invite
   S-->>B: Invite ID
   Note over B: Link = address + invite ID + # + one-time private key
@@ -73,7 +75,7 @@ flowchart TD
 | 1. Get the box private key | Tiger's envelope and key copy. Face ID, if the box is locked. | Unlock the envelope ([scenario 3, step B1](03-add-item.md#steps-input-method-output-1)). Then unlock the key copy (step B2). | Box private key `AGE-SECRET-KEY-1TECYTY27F3E…` | Step 3 |
 | 2. Make the one-time key | Random bytes. | X25519 key generation. | One-time private key `AGE-SECRET-KEY-1ZQYRVJWHT7S…`. One-time public key `age1zmqagtd3ryrvzkfa…`. | Public key → step 3. Private key → step 5. |
 | 3. Lock the box private key | The box private key (step 1). The one-time public key (step 2). | age file with an **X25519** stanza. | The **invite file**, 274 bytes. | Step 4 |
-| 4. Keep the invite | The invite file. Label "Nok, finance". Role "reader". Time limit 24 hours. Box key version 1. | `POST /api/boxes/:id/invites`. The server checks that the box key did not change. | An invite row. Invite ID `n2Wct0b4C-ivqkLH2pCjjw`. | Step 5 |
+| 4. Keep the invite | The invite file. Name "Nok". Time limit 24 hours. Box key version 1. | `POST /api/boxes/:id/invites`. The server checks that the box key did not change. | An invite row. Invite ID `n2Wct0b4C-ivqkLH2pCjjw`. | Step 5 |
 | 5. Make the link | The page address. The invite ID (step 4). The one-time private key (step 2). | Join them in the browser. | The link. | Nok ([scenario 5](05-use-invite.md)) |
 
 ### Inside step 3: how the invite file is made
@@ -111,18 +113,18 @@ https://secretbox-nu.vercel.app/join/n2Wct0b4C-ivqkLH2pCjjw#AGE-SECRET-KEY-1ZQYR
 
 ## Why the box key version matters
 
-The invite file holds the **current** box private key. If an admin changes the box key at the same moment, the invite file is old and useless. The server prevents this:
+The invite file holds the **current** box private key. If a member changes the box key at the same moment, the invite file is old and useless. The server prevents this:
 
 - The browser sends the box key version that it used (here, 1).
 - The server reads the box row with a shared lock (`FOR SHARE`). It compares the version.
 - If the version changed, the server refuses the invite. The browser must reload.
-- When an admin changes the box key later, the server cancels all open invites.
+- When a member changes the box key later, the server cancels all open invites.
 
 ## Result
 
 | Where | What |
 |---|---|
-| Server | The invite row: the invite file, the label, the role, the time limit, who made it. |
+| Server | The invite row: the invite file, the name, the time limit, who made it. |
 | The link (in Tiger's chat with Nok) | The invite ID and the one-time private key. |
 | Nowhere else | The one-time private key. The server and the database never get it. |
 

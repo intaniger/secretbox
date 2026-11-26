@@ -1,4 +1,4 @@
-import { api, ApiError, registerPasskey, signInWithPasskey, type BoxDetail, type InviteInfo, type Me, type Role } from "./api.ts";
+import { api, ApiError, registerPasskey, signInWithPasskey, type BoxDetail, type InviteInfo, type Me } from "./api.ts";
 import * as vault from "./vault.ts";
 
 // ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ async function homeView() {
             ...boxes.map((b) =>
               h("li", {},
                 h("a", { href: `/box/${b.id}`, onclick: link(`/box/${b.id}`), class: "row-main" }, b.name),
-                h("span", { class: "muted small" }, `${b.role} · ${b.item_count} items · ${b.member_count} members`),
+                h("span", { class: "muted small" }, `${b.item_count} items · ${b.member_count} members`),
               ),
             ),
           ),
@@ -225,7 +225,7 @@ async function boxView(boxId: string) {
     }
     throw err;
   }
-  const isAdmin = d.me.role === "admin";
+  // There are no roles: every member can add, invite, remove and delete.
   const refresh = () => boxView(boxId);
 
   async function ensureUnlocked() {
@@ -258,8 +258,8 @@ async function boxView(boxId: string) {
           );
           if (!document.querySelector(".topbar .pill.ok")) app.querySelector(".topbar")?.replaceWith(topbar());
         });
-      const delBtn = isAdmin && h("button", { class: "link danger" }, "Delete");
-      if (delBtn) delBtn.onclick = () => act(delBtn, "Deleting…", async () => {
+      const delBtn = h("button", { class: "link danger" }, "Delete");
+      delBtn.onclick = () => act(delBtn, "Deleting…", async () => {
         if (!confirm(`Delete "${it.name}"?`)) return;
         await api.del(`/api/boxes/${boxId}/items/${it.id}`);
         await refresh();
@@ -277,9 +277,9 @@ async function boxView(boxId: string) {
     }),
   );
 
-  // --- Add data (admins)
-  let addCard: HTMLElement | null = null;
-  if (isAdmin) {
+  // --- Add data
+  let addCard: HTMLElement;
+  {
     const noteName = h("input", { value: "note.txt", "data-test": "note-name" });
     const note = h("textarea", { rows: 4, placeholder: "Type something secret…", "data-test": "note-text" });
     const noteBtn = h("button", { class: "primary", "data-test": "add-note" }, "Lock and add note");
@@ -310,35 +310,38 @@ async function boxView(boxId: string) {
   // --- Members
   const members = h("ul", { class: "list", "data-test": "members" },
     ...d.members.map((m) => {
-      const rm = isAdmin && m.userId !== d.me.userId && h("button", { class: "link danger", "data-test": `remove-${m.nickname}` }, "Remove");
+      const rm = m.userId !== d.me.userId && h("button", { class: "link danger", "data-test": `remove-${m.name}` }, "Remove");
       if (rm) rm.onclick = () => act(rm, "Removing and changing the box key…", async () => {
-        if (!confirm(`Remove ${m.nickname}? This changes the box key. Everyone else keeps access.`)) return;
+        if (!confirm(`Remove ${m.name}? This changes the box key. Everyone else keeps access.`)) return;
         await ensureUnlocked();
         await vault.removeMember(d, m.userId);
         await refresh();
-        say(`${m.nickname} was removed. The box key changed and open invites were canceled.`, "ok");
+        say(`${m.name} was removed. The box key changed and open invites were canceled.`, "ok");
       });
-      return h("li", { class: "row" },
-        h("div", {}, h("span", { class: "row-main" }, m.nickname, m.userId === d.me.userId ? " (you)" : ""), " ", h("span", { class: "pill" }, m.role)),
-        h("div", { class: "actions" }, h("span", { class: "muted small" }, `joined ${fmtDate(m.joinedAt)}`), rm),
+      const who = m.invitedBy ? `invited by ${m.invitedBy}` : "made this box";
+      return h("li", { class: "row", "data-test": "member" },
+        h("div", {},
+          h("div", { class: "row-main" }, m.name, m.userId === d.me.userId ? " (you)" : ""),
+          h("div", { class: "muted small" }, `${who} · ${fmtDate(m.joinedAt)}`),
+        ),
+        h("div", { class: "actions" }, rm),
       );
     }),
   );
 
-  // --- Invites (admins)
-  let inviteCard: HTMLElement | null = null;
-  if (isAdmin) {
-    const label = h("input", { placeholder: "Who is it for? e.g. Nok, finance", "data-test": "invite-label" });
-    const role = h("select", { "data-test": "invite-role" }, h("option", { value: "reader" }, "Reader"), h("option", { value: "admin" }, "Admin"));
+  // --- Invites: any member can invite
+  let inviteCard: HTMLElement;
+  {
+    const name = h("input", { placeholder: "e.g. Nok", autocomplete: "off", "data-test": "invite-name" });
     const ttl = h("select", {},
       h("option", { value: "1" }, "1 hour"), h("option", { value: "24", selected: true }, "24 hours"),
       h("option", { value: "72" }, "3 days"), h("option", { value: "168" }, "7 days"));
     const result = h("div", {});
     const invBtn = h("button", { class: "primary", "data-test": "create-invite" }, "Create invite link");
     invBtn.onclick = () => act(invBtn, "Creating invite…", async () => {
-      if (!label.value.trim()) throw Error("Type who the invite is for.");
+      if (!name.value.trim()) throw Error("Type the name of the person you invite.");
       await ensureUnlocked();
-      const url = await vault.createInvite(d, label.value.trim(), role.value as Role, Number(ttl.value));
+      const url = await vault.createInvite(d, name.value.trim(), Number(ttl.value));
       const out = h("input", { readOnly: true, value: url, "data-test": "invite-link" });
       const copy = h("button", {}, "Copy");
       copy.onclick = async () => { await navigator.clipboard.writeText(url); copy.textContent = "Copied"; };
@@ -358,25 +361,27 @@ async function boxView(boxId: string) {
           await refresh();
         });
         return h("li", { class: "row" },
-          h("div", {}, h("span", { class: "row-main" }, i.label), " ", h("span", { class: `pill ${i.status}` }, i.status)),
-          h("div", { class: "actions" },
-            h("span", { class: "muted small" }, i.usedBy ? `used by ${i.usedBy}` : i.status === "open" ? `expires ${fmtDate(i.expiresAt)}` : ""),
-            cancel),
+          h("div", {},
+            h("div", {}, h("span", { class: "row-main" }, i.name), " ", h("span", { class: `pill ${i.status}` }, i.status)),
+            h("div", { class: "muted small" },
+              `by ${i.invitedBy ?? "?"}`, i.status === "open" ? ` · expires ${fmtDate(i.expiresAt)}` : ""),
+          ),
+          h("div", { class: "actions" }, cancel),
         );
       }),
     );
     inviteCard = h("section", { class: "card" },
       h("h2", {}, "Invite someone"),
-      h("label", {}, "For", label),
-      h("div", { class: "grid2" }, h("label", {}, "Role", role), h("label", {}, "Expires after", ttl)),
+      h("p", { class: "muted small" }, "Everybody in this box can invite others. The name you type is how this person appears here."),
+      h("div", { class: "grid2" }, h("label", {}, "Their name", name), h("label", {}, "Expires after", ttl)),
       invBtn, result,
       d.invites.length > 0 && h("h3", {}, "Invites"), d.invites.length > 0 && list,
     );
   }
 
-  // --- Outside systems (admins)
-  let ingestCard: HTMLElement | null = null;
-  if (isAdmin) {
+  // --- Outside systems
+  let ingestCard: HTMLElement;
+  {
     const tLabel = h("input", { placeholder: "e.g. Google Form", "data-test": "token-label" });
     const tOut = h("div", {});
     const tBtn = h("button", { "data-test": "create-token" }, "Create token");
@@ -406,7 +411,7 @@ async function boxView(boxId: string) {
     topbar(),
     h("section", { class: "boxhead" },
       h("a", { href: "/", onclick: link("/"), class: "small" }, "← Boxes"),
-      h("h1", { "data-test": "box-title" }, d.box.name, " ", h("span", { class: "pill" }, d.me.role)),
+      h("h1", { "data-test": "box-title" }, d.box.name),
     ),
     !vault.isUnlocked() &&
       h("section", { class: "card locked" },
@@ -435,8 +440,8 @@ async function joinView(inviteId: string) {
   if (!info) return head(h("h2", {}, "Invite not found"), h("p", {}, "Check the link, or ask for a new one."));
   const intro = [
     h("h2", {}, "You're invited"),
-    h("p", {}, `${info.invitedBy} invited you to ${info.role === "admin" ? "manage" : "read"} “${info.boxName}”.`),
-    h("p", { class: "muted small" }, `Invite: ${info.label}`),
+    h("p", {}, `${info.invitedBy} invited you to “${info.boxName}”.`),
+    h("p", { class: "muted small", "data-test": "invite-as" }, `You will appear as ${info.name} in this box.`),
   ];
   if (!oneTimeKey.startsWith("AGE-SECRET-KEY-1")) {
     return head(...intro, h("p", { class: "error" }, "This link is incomplete. Open the full link exactly as it was sent."));
@@ -456,12 +461,11 @@ async function joinView(inviteId: string) {
   };
 
   if (!me) {
-    const nick = h("input", { placeholder: "Your name", autocomplete: "nickname", "data-test": "nickname" });
+    // The person who invited typed the name, so there is nothing to fill in.
     const accept = h("button", { class: "primary", "data-test": "accept" }, "Accept and make passkey");
     accept.onclick = () =>
       act(accept, "Step 1 of 2: make your passkey…", async () => {
-        if (!nick.value.trim()) throw Error("Type your name.");
-        await registerPasskey(nick.value.trim());
+        await registerPasskey(info.name);
         const account = (await loadMe())!;
         say("Step 2 of 2: confirm your passkey again to lock your key…");
         await vault.setupMemberKey(account);
@@ -470,12 +474,11 @@ async function joinView(inviteId: string) {
     const signIn = h("button", { class: "link" }, "I already have a passkey");
     signIn.onclick = () => act(signIn, "Waiting for your passkey…", async () => { await signInWithPasskey(); await render(); });
     return head(...intro,
-      h("label", {}, "Your name", nick),
-      h("p", { class: "muted small" }, "No email needed. Your device asks for your passkey two times. The link stops working after you accept."),
+      h("p", { class: "muted small" }, "Nothing to fill in, and no email. Your device asks for your passkey two times. The link stops working after you accept."),
       accept, " ", signIn);
   }
 
-  const accept = h("button", { class: "primary", "data-test": "accept" }, `Accept as ${me.nickname}`);
+  const accept = h("button", { class: "primary", "data-test": "accept" }, "Accept");
   accept.onclick = () =>
     act(accept, "Joining…", async () => {
       let account = me;

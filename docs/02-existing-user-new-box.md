@@ -56,7 +56,7 @@ flowchart TD
 | 1. Get the member public key | The session cookie. | `GET /api/me` | Member public key `age1gffpl2mrf5g92mje…` | Step 3 |
 | 2. Make the box key | Random bytes. | X25519 key generation. | Private key `AGE-SECRET-KEY-132C4K2987NN…`. Public key `age1g65kgg6w726z4638…`. | Private key → step 3. Public key → step 4. |
 | 3. Lock the box private key | The box private key (step 2). The member public key (step 1). | age file with an **X25519** stanza. | Tiger's key copy for "HR 2027", 274 bytes. | Step 4 |
-| 4. Keep the box | The box name. The box public key (step 2). The key copy (step 3). | `POST /api/boxes` | A box row. A membership row with the role "admin". | Scenarios 3 and 4 |
+| 4. Keep the box | The box name. The box public key (step 2). The key copy (step 3). | `POST /api/boxes` | A box row. A membership row with Tiger's name. | Scenarios 3 and 4 |
 
 ### Inside step 3: how the key copy is made
 
@@ -106,4 +106,4 @@ To read the new box later, Tiger unlocks his envelope (1 Face ID, if the tab is 
 - [The X25519 stanza, header check and payload](technical/age-format.md)
 - [API calls and database statements](technical/api-and-sql.md)
 
-[← Previous](01-new-user-new-box.md) · [Next: an admin adds an item →](03-add-item.md)
+[← Previous](01-new-user-new-box.md) · [Next: a member adds an item →](03-add-item.md)

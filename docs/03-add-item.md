@@ -1,4 +1,4 @@
-# 3. An admin adds an item, and a member reads it
+# 3. A member adds an item, and a member reads it
 
 [← All documents](README.md) · [Word list](README.md#the-words-in-these-documents)
 
@@ -169,7 +169,7 @@ Each unlock does the age recipe backwards. The values are the same values that t
 
 Only a person who has one of the two private parts can calculate the value.
 
-**Old box keys.** If an admin changed the box key, older items are locked to an older box key. B2 then also unlocks the **key history**, which holds the old box private keys. B3 tries each key until one fits.
+**Old box keys.** If a member changed the box key, older items are locked to an older box key. B2 then also unlocks the **key history**, which holds the old box private keys. B3 tries each key until one fits.
 
 **Face ID count to read:**
 
@@ -192,4 +192,4 @@ Only a person who has one of the two private parts can calculate the value.
 - [The fido2prf stanza (step B1)](technical/passkey-prf.md)
 - [API calls and database statements](technical/api-and-sql.md)
 
-[← Previous](02-existing-user-new-box.md) · [Next: an admin makes an invite link →](04-create-invite.md)
+[← Previous](02-existing-user-new-box.md) · [Next: a member makes an invite link →](04-create-invite.md)

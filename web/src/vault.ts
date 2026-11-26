@@ -1,7 +1,7 @@
 // The user actions, built from keys.ts + the API. Each function notes how many
 // passkey prompts (Face ID / fingerprint) it causes.
 
-import { api, type BoxDetail, type Me, type Role } from "./api.ts";
+import { api, type BoxDetail, type Me } from "./api.ts";
 import * as keys from "./keys.ts";
 
 // The member key, unlocked. Lives only in this tab's memory.
@@ -65,17 +65,17 @@ export async function openItem(d: BoxDetail, itemId: string): Promise<Uint8Array
 }
 
 /**
- * Needs the box unlocked. Locks a copy of the box key to a new one-time key,
- * and puts that one-time key after the "#" of the link. Browsers never send
- * the "#" part to the server, so the server can't open the invite file.
+ * Any member can do this. Needs the box unlocked. Locks a copy of the box key
+ * to a new one-time key, and puts that one-time key after the "#" of the link.
+ * Browsers never send the "#" part to the server, so the server can't open the
+ * invite file. `name` is how the invited person will appear in this box.
  */
-export async function createInvite(d: BoxDetail, label: string, role: Role, ttlHours: number): Promise<string> {
+export async function createInvite(d: BoxDetail, name: string, ttlHours: number): Promise<string> {
   const [boxIdentity] = await boxIdentities(d);
   const oneTime = await keys.newKeyPair();
   const inviteFile = await keys.lockTo(oneTime.recipient, boxIdentity);
   const { id } = await api.post<{ id: string }>(`/api/boxes/${d.box.id}/invites`, {
-    label,
-    role,
+    name,
     ttlHours,
     keyVersion: d.box.keyVersion,
     inviteFile: keys.toB64(inviteFile),

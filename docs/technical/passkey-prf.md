@@ -116,9 +116,9 @@ Each file has its own nonce, so each file has its own wrap key. Without the pass
 
 ## Why only the owner can lock
 
-The lock steps also need the passkey and Face ID. This is a **symmetric** lock: there is no public part. An admin cannot lock data for Nok's passkey.
+The lock steps also need the passkey and Face ID. This is a **symmetric** lock: there is no public part. Another member cannot lock data for Nok's passkey.
 
-This is why Secretbox has a member key between the passkey and the box key. The member **public** key lets admins lock key copies for Nok at any time, without her passkey.
+This is why Secretbox has a member key between the passkey and the box key. The member **public** key lets other members lock key copies for Nok at any time, without her passkey.
 
 ## How the page selects the correct passkey
 

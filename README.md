@@ -2,8 +2,10 @@
 
 A proof of concept for sharing confidential data **without collecting emails**.
 
-- An admin sends a **one-time invite link**. It stops working after one use.
-- Readers **unlock the data with their passkey** (Face ID, fingerprint, security key).
+- A member sends a **one-time invite link**. It stops working after one use.
+- The person who invites types the new member's name. **The new member types nothing**: one tap on Accept.
+- Members **unlock the data with their passkey** (Face ID, fingerprint, security key).
+- **No roles.** Every member can read, add, invite and remove. Encryption can't make anyone read-only anyway: every member holds the box key.
 - The browser locks and unlocks everything. The server stores **only locked files**.
 
 Encryption is [age](https://age-encryption.org) via [Typage](https://github.com/FiloSottile/typage), which can use a passkey's [WebAuthn PRF extension](https://w3c.github.io/webauthn/#prf-extension) as an age key. No custom cryptography.
@@ -16,11 +18,12 @@ Encryption is [age](https://age-encryption.org) via [Typage](https://github.com/
 |---|---|---|
 | Tiger | Creates a box: types his name and a box name | 2 (make passkey, lock key) |
 | Tiger | Adds data: a note or a file | 0 |
-| Tiger | Creates an invite link and sends it in a private chat | 0 (1 if locked) |
-| Nok | Opens the link, types her name, taps **Accept** | 2 (make passkey, lock key) |
+| Tiger | Creates an invite link for "Nok" and sends it in a private chat | 0 (1 if locked) |
+| Nok | Opens the link and taps **Accept**. Nothing to type | 2 (make passkey, lock key) |
+| Nok | Invites Bee herself. Bee shows as "invited by Nok" | 0 (1 if locked) |
 | Nok | Comes back later and opens data | 1 per visit |
 | A form tool | Adds data with the box's public key and a token | — |
-| Tiger | Removes someone. The box key changes. Everyone else keeps access | 0 (1 if locked) |
+| Any member | Removes someone. The box key changes. Everyone else keeps access | 0 (1 if locked) |
 
 ## How it works
 
@@ -34,11 +37,11 @@ Box key      — one per box, age X25519
 Data         — age files
 ```
 
-- **Why a member key?** In age, encrypting *to a passkey* needs that passkey present. So an admin can't lock a new box key for other people's passkeys. The member key gives each person an ordinary `age1…` public key that an admin can lock to at any time, for example when the box key changes.
+- **Why a member key?** In age, encrypting *to a passkey* needs that passkey present. So a member can't lock a new box key for other people's passkeys. The member key gives each person an ordinary `age1…` public key that any member can lock to at any time, for example when the box key changes.
 - **Adding data needs no secret.** Data is locked to the box's public `age1…` key. That's why outside systems can add data but never read it.
 - **Invite links.** The browser makes a one-time age key pair and locks a copy of the box key to it. The one-time secret key goes after `#` in the link: `/join/{id}#AGE-SECRET-KEY-1…`. Browsers never send the `#` part to the server.
 - **Joining.** Opening the page changes nothing, so link previews (LINE, Slack, iMessage) can't burn the invite. **Accept** makes the passkey and member key, then `POST /claim` marks the invite used, atomically. The browser opens the invite file with the `#` key and locks the box key again to the new member key. Then the server deletes the invite file and the `#` part is removed from the address bar.
-- **Removing someone.** The admin's browser makes a new box key and locks it to each remaining member's public key. Old box keys go into a *key history* file locked to the new key, so old data stays readable without locking it again. Open invites are canceled, because they hold the old box key.
+- **Removing someone.** The remover's browser makes a new box key and locks it to each remaining member's public key. Old box keys go into a *key history* file locked to the new key, so old data stays readable without locking it again. Open invites are canceled, because they hold the old box key.
 - **Sessions.** The same passkey also signs in to the server (normal WebAuthn login, using [SimpleWebAuthn](https://simplewebauthn.dev)). Unlocked keys live only in the tab's memory: closing the tab or **Lock** forgets them.
 
 ### What the server stores
@@ -49,9 +52,9 @@ Data         — age files
 | `passkeys` | credential ID, public key (for login), **envelope** |
 | `sessions`, `webauthn_flows` | login sessions (hashed tokens) and short-lived passkey challenges |
 | `boxes` | name, box `age1…` key, **key history** |
-| `memberships` | role, **key copy** |
+| `memberships` | name in this box, invited by, **key copy** |
 | `items` | name, size, **age file** |
-| `invites` | label, role, expiry, used by, **invite file** (deleted after use) |
+| `invites` | name of the invited person, expiry, used by, **invite file** (deleted after use) |
 | `ingest_tokens` | SHA-256 of each token |
 
 Everything in **bold** is an age file the server can't open.
@@ -92,7 +95,7 @@ The project deploys with the [Build Output API](https://vercel.com/docs/build-ou
 
 ## Add data from another system
 
-In the box page, an admin creates a token under **Outside systems**. Then, with the [age CLI](https://github.com/FiloSottile/age):
+In the box page, any member creates a token under **Outside systems**. Then, with the [age CLI](https://github.com/FiloSottile/age):
 
 ```sh
 age -r age1…box-public-key… answer.txt \
@@ -124,8 +127,9 @@ This is a PoC. Know these before you trust it with real data:
 - **The server serves the code that holds the keys.** A compromised server could serve JavaScript that steals keys after unlock. Mitigations: a strict CSP (in place), hosting the static app separately from the API, and published builds people can check.
 - **Removing someone doesn't erase what they read.** They can't get new data, and the server stops serving them. But if they kept an old box key, they can still read *old* data if they ever get those locked files.
 - **One leaked member key exposes that person's future key copies.** A "change my key" action isn't built yet.
-- **Not encrypted:** file names, sizes, dates, nicknames, box names, member lists.
-- **Lost passkey = lost access** for that person. Synced passkeys (iCloud, Google) make this rare. An admin can send a new invite. There's no paper recovery key and no "add device" flow yet.
+- **Not encrypted:** file names, sizes, dates, names, box names, member lists, who invited whom.
+- **Every member can do everything:** invite anyone, remove anyone (also the box creator), delete items. Access can spread further than the first person intended. Each member row shows who invited them.
+- **Lost passkey = lost access** for that person. Synced passkeys (iCloud, Google) make this rare. Any member can send a new invite. There's no paper recovery key and no "add device" flow yet.
 - **An invite link is a secret until it's used.** Anyone who opens it first gets in. Send it privately, and keep expiry short.
 - **PoC infrastructure:** no rate limits, no audit log, items up to 4 MB.
 - **Typage's WebAuthn API is marked experimental.** The version is pinned in `package-lock.json`.

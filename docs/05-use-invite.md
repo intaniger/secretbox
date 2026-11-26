@@ -4,7 +4,7 @@
 
 ## In short
 
-Nok opens Tiger's link. She types her name and selects **Accept**. Her phone asks for Face ID two times. Then she sees the box.
+Nok opens Tiger's link. She selects **Accept**. She does not type anything: her name comes from the invite. Her phone asks for Face ID two times. Then she sees the box.
 
 During these steps:
 
@@ -17,8 +17,8 @@ During these steps:
 ## What Nok sees
 
 1. Open the link from the chat.
-2. The page shows: "Tiger invited you to read 'Finance 2026'."
-3. Type a name ("Nok"). Select **Accept and make passkey**.
+2. The page shows: "Tiger invited you to 'Finance 2026'. You will appear as Nok in this box."
+3. Select **Accept and make passkey**.
 4. Confirm with Face ID. The phone makes a passkey.
 5. Confirm with Face ID again. The phone locks her member key.
 6. The box opens. The address bar does not show the `#` part any more.
@@ -45,8 +45,8 @@ sequenceDiagram
   N->>B: Open the link
   Note over B: Keep the one-time private key from the link in memory
   B->>S: GET /api/invites/ID
-  S-->>B: Box name, inviter, role, status open
-  N->>B: Name, Accept
+  S-->>B: Box name, inviter, her name, status open
+  N->>B: Accept
   B->>S: Ask for passkey options
   S-->>B: Challenge
   B->>P: Make a passkey
@@ -88,15 +88,15 @@ flowchart TD
 
 | Step | Input | Method | Output | Goes to |
 |---|---|---|---|---|
-| 1. Open the link | The link. | The browser reads the part after `#`. `GET /api/invites/n2Wct0b4C-ivqkLH2pCjjw` gives the status. | The one-time private key `AGE-SECRET-KEY-1ZQYRVJWHT7S…`, in memory. Status "open". | Step 7 |
-| 2. Make the passkey and sign in | A challenge from the server. Face ID 1. | WebAuthn registration, as in [scenario 1](01-new-user-new-box.md). | Nok's passkey, credential ID `ja_SNBMxGp7ZfADxslkScA`. A session cookie. | Steps 4 and 6 |
+| 1. Open the link | The link. | The browser reads the part after `#`. `GET /api/invites/n2Wct0b4C-ivqkLH2pCjjw` gives the status. | The one-time private key `AGE-SECRET-KEY-1ZQYRVJWHT7S…`, in memory. Status "open". Her name "Nok". | Steps 2 and 7 |
+| 2. Make the passkey and sign in | A challenge from the server. The name from the invite. Face ID 1. | WebAuthn registration, as in [scenario 1](01-new-user-new-box.md). The phone shows the name with the passkey. | Nok's passkey, credential ID `ja_SNBMxGp7ZfADxslkScA`. A session cookie. | Steps 4 and 6 |
 | 3. Make the member key | Random bytes. | X25519 key generation. | Private key `AGE-SECRET-KEY-13YSGDVJWX2U…`. Public key `age13xxmju0leg22w5x4…`. | Private key → step 4. Public key → steps 5 and 8. |
 | 4. Lock the member private key | The member private key (step 3). The passkey (step 2). Face ID 2. | age file with a **fido2prf** stanza. | Nok's **envelope**, 274 bytes. | Step 5 |
 | 5. Keep the member key | The member public key (step 3). The envelope (step 4). | `PUT /api/me/keys` | The server keeps both. | Later unlocks |
 | 6. Claim the invite | The invite ID. The session cookie. | `POST /api/invites/:id/claim`. One database statement marks the invite "used by Nok". | The invite file (274 bytes). | Step 7 |
 | 7. Unlock the invite file | The invite file (step 6). The one-time private key (step 1). | age with an **X25519** stanza, backwards. | Box private key `AGE-SECRET-KEY-1TECYTY27F3E…` | Step 8 |
 | 8. Lock the box private key | The box private key (step 7). Nok's member public key (step 3). | age file with an **X25519** stanza. | Nok's **key copy**, 274 bytes. | Step 9 |
-| 9. Complete | The key copy (step 8). | `POST /api/invites/:id/complete`. One database transaction. | Nok's membership row. The server deletes the invite file. | The box |
+| 9. Complete | The key copy (step 8). | `POST /api/invites/:id/complete`. One database transaction. | Nok's membership row, with the name "Nok" from the invite and "invited by Tiger". The server deletes the invite file. | The box |
 | 10. Clean the address | The address bar. | `history.replaceState` | The address becomes `/box/<id>`. The one-time private key is not in the address bar or in the Back button. | |
 
 ### Inside step 4: Nok's envelope
@@ -155,7 +155,7 @@ Step 9 deletes the invite file. After that, the one-time private key has nothing
 
 | Case | What changes |
 |---|---|
-| Nok already has an account and is signed in | Steps 2 to 5 do not occur. The page shows **Accept as Nok**. Face ID count: 0. The key copy needs only her member public key. |
+| Nok already has an account and is signed in | Steps 2 to 5 do not occur. The page shows **Accept**. Face ID count: 0. The key copy needs only her member public key. In this box, she has the name from the invite. |
 | Nok has an account but is signed out | She selects **I already have a passkey**. Sign-in takes 1 Face ID. Then steps 6 to 10. |
 | Nok is already a member of the box | The server refuses step 6 before it marks the invite. The invite stays unused. |
 | Opening the page only, or a chat app makes a link preview | Nothing changes. Only **Accept** starts step 6. |

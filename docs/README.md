@@ -8,7 +8,9 @@ The text uses [ASD-STE100 Simplified Technical English](https://www.asd-ste100.o
 
 Secretbox keeps shared data in locked boxes. A person opens a box with Face ID or a fingerprint, through a passkey on their phone. The server keeps the boxes, but it cannot open them.
 
-To give access, an admin sends a link. The link works one time. Nobody types an email address.
+To give access, a member sends a link. The link works one time. Nobody types an email address.
+
+There are no roles. Each member can read, add items, invite other people and remove members. The person who invites types the name of the new member. The new member types nothing.
 
 ## Read this first: padlocks and keys
 
@@ -86,10 +88,10 @@ Details: [technical/age-format.md](technical/age-format.md).
 
 ## The example people
 
-| Person | Role |
+| Person | What they do |
 |---|---|
-| **Tiger** | Makes the box "Finance 2026". He is the admin. |
-| **Nok** | Gets an invite link from Tiger. She is a reader. |
+| **Tiger** | Makes the box "Finance 2026". |
+| **Nok** | Gets an invite link from Tiger. Later, she invites Bee. |
 | **Mallory** | Finds Nok's link after Nok used it. |
 
 All example values are real outputs of the same code that Secretbox uses. The script simulates one part: the passkeys. A real passkey never shows its hidden secret.
@@ -116,8 +118,8 @@ Each scenario document has the same parts. The first three parts need no technic
 
 1. [A new person makes an account and a box](01-new-user-new-box.md)
 2. [A person with an account makes a new box](02-existing-user-new-box.md)
-3. [An admin adds an item, and a member reads it](03-add-item.md)
-4. [An admin makes an invite link](04-create-invite.md)
+3. [A member adds an item, and a member reads it](03-add-item.md)
+4. [A member makes an invite link](04-create-invite.md)
 5. [A person uses an invite link](05-use-invite.md)
 6. [An invite link is expired, or another person opens a used link](06-invite-expired-or-reused.md)
 7. [What the database keeps](07-storage.md)

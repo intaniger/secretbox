@@ -32,6 +32,7 @@ This document lists each known flaw. Each flaw has a level:
 | 12 | No rate limits, no audit log, no way to cancel tokens | Low | Not built yet |
 | 13 | Unlocked data stays in the browser tab | Low | A fix is possible. |
 | 14 | Passkey PRF support is not the same everywhere | Low | Design limit |
+| 15 | Every member can do everything | Medium | Design choice |
 
 ## 1. The server sends the code that holds the keys
 
@@ -65,19 +66,19 @@ flowchart LR
 
 **What:** The browser locks keys with public keys that it gets from the server. The browser does not verify that a public key really belongs to that person. Examples:
 
-- When an admin removes a member, the browser locks the new box private key to each member public key in the list. The server can add an extra "member" with the attacker's public key.
+- When a member removes another member, the browser locks the new box private key to each member public key in the list. The server can add an extra "member" with the attacker's public key.
 - When a person makes a box, the browser locks the box private key to the member public key from `/api/me`.
-- Admins and other systems lock items to the box public key from the server.
+- Members and other systems lock items to the box public key from the server.
 
 **Who can use it:** A person who controls the server or the database.
 
-**Effect:** The attacker gets a copy of a box private key. Or admins and other systems lock new items to the attacker's key.
+**Effect:** The attacker gets a copy of a box private key. Or members and other systems lock new items to the attacker's key.
 
 **Fix:** Show a short **key fingerprint** for each member key. People compare the fingerprints face to face or by phone. The browser can also remember fingerprints and show a warning if one changes.
 
 ## 3. Expired invites keep the invite file
 
-**What:** The server deletes the invite file when a person completes an invite or an admin cancels it. It does **not** delete it when an invite expires.
+**What:** The server deletes the invite file when a person completes an invite or a member cancels it. It does **not** delete it when an invite expires.
 
 **Who can use it:** A person who has the link **and** a copy of the database.
 
@@ -110,7 +111,7 @@ flowchart LR
 
 ## 6. A stolen member private key also opens future key copies
 
-**What:** Admins lock new box private keys to member public keys, for example after a key change or for a new box. If a person steals a member private key, they can also unlock these future key copies.
+**What:** Members lock new box private keys to member public keys, for example after a key change or for a new box. If a person steals a member private key, they can also unlock these future key copies.
 
 **Who can use it:** A person who stole a member private key, for example through flaw 1 or malware on the device.
 
@@ -120,9 +121,9 @@ flowchart LR
 
 ## 7. Names, sizes, dates and members are not locked
 
-**What:** These are not locked: nicknames, box names, item names, item sizes, dates, who is in which box, invite labels.
+**What:** These are not locked: names, box names, item names, item sizes, dates, who is in which box, who invited whom.
 
-Also, `GET /api/invites/:id` needs no sign-in. A person with the invite ID sees the box name, the inviter's nickname, the label and the role.
+Also, `GET /api/invites/:id` needs no sign-in. A person with the invite ID sees the box name, the inviter's name and the name of the invited person.
 
 **Who can use it:** A person with database access. For the invite information: a person with the link.
 
@@ -152,7 +153,7 @@ Also, `GET /api/invites/:id` needs no sign-in. A person with the invite ID sees 
 
 **What:** If a join stops after the claim (step 6 of [scenario 5](05-use-invite.md)), the status becomes "used". The server allows the same person to try again. But the page shows "already used" to everybody, also to that person.
 
-**Effect:** The person cannot join. The invite file stays in the database (see flaw 3). The admin must send a new link.
+**Effect:** The person cannot join. The invite file stays in the database (see flaw 3). A member must send a new link.
 
 **Fix:** If the status is "used" and the person is signed in, let the page try the claim. The server then decides.
 
@@ -170,7 +171,7 @@ Also, `GET /api/invites/:id` needs no sign-in. A person with the invite ID sees 
 
 - The server does not limit how many requests a person can send.
 - The server does not record who opened which item.
-- An admin cannot cancel an ingest token in the app.
+- A member cannot cancel an ingest token in the app.
 - **Sign out** ends only the current session. Other sessions stay valid for 30 days.
 
 **Fix:** Add these functions before real use.
@@ -188,6 +189,28 @@ Also, `GET /api/invites/:id` needs no sign-in. A person with the invite ID sees 
 **What:** Apple Passwords and Google Password Manager support PRF. Some other password managers do not. Typage marks its passkey function as experimental.
 
 **Effect:** Some people cannot make an account. The app shows a message during sign-up.
+
+## 15. Every member can do everything
+
+**What:** There are no roles. Each member can:
+
+- invite any person, and those people can invite more people,
+- remove any other member, also the person who made the box,
+- delete items,
+- make ingest tokens.
+
+**Who can use it:** Any member, for example a careless member or a member whose device is stolen.
+
+**Effect:** Access can spread further than the first person wanted. One member can remove others or delete data.
+
+This is a deliberate choice. Encryption cannot make a member "read only": each member has the box private key and can copy each item. Roles were only a server rule.
+
+**How to decrease the risk:**
+
+- Each member row shows **invited by**, so the members can see how access spread.
+- Give access only to people you trust with the whole box.
+- If a member leaves the group, remove them. This changes the box key.
+- A later version can keep deleted items for some days, so a member can undo a deletion.
 
 ## What Secretbox does protect
 

@@ -86,7 +86,7 @@ flowchart TD
 | 5. Keep the member key | The member public key (step 3). The envelope (step 4). | `PUT /api/me/keys` | The server keeps both. | Later unlocks |
 | 6. Make the box key | Random bytes. | X25519 key generation. | Private key `AGE-SECRET-KEY-1TECYTY27F3E…`. Public key `age1cmaf95n0vkusfv0s…`. | Private key → step 7. Public key → step 8. |
 | 7. Lock the box private key | The box private key (step 6). The member public key (step 3). | age file with an **X25519** stanza. No Face ID. | Tiger's **key copy**, 274 bytes. | Step 8 |
-| 8. Keep the box | The box name. The box public key (step 6). The key copy (step 7). | `POST /api/boxes` | A box row. A membership row with the role "admin". | Scenarios 3 and 4 |
+| 8. Keep the box | The box name. The box public key (step 6). The key copy (step 7). | `POST /api/boxes` | A box row. A membership row with Tiger's name. | Scenarios 3 and 4 |
 
 ### Inside step 4: how the envelope is made
 
@@ -140,7 +140,7 @@ y5ajlMOW+twlhmmeK2CcMcikDO5kc9c8JW6jEcEn5QE
 |---|---|
 | Phone | The passkey and its hidden PRF secret. They never leave the phone. |
 | Browser tab memory | The member private key. It stays until Tiger closes the tab or selects **Lock**. |
-| Server | Tiger's nickname. The passkey public key. The member public key. The envelope. The box public key. The key copy. The hash of the session token. |
+| Server | Tiger's name. The passkey public key. The member public key. The envelope. The box public key. The key copy. The hash of the session token. |
 | Nowhere | Nobody keeps the box private key in a readable form. At this moment, Tiger's key copy is its only copy. |
 
 **Face ID count:** 2.
