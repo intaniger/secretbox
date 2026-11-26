@@ -8,6 +8,8 @@ A proof of concept for sharing confidential data **without collecting emails**.
 
 Encryption is [age](https://age-encryption.org) via [Typage](https://github.com/FiloSottile/typage), which can use a passkey's [WebAuthn PRF extension](https://w3c.github.io/webauthn/#prf-extension) as an age key. No custom cryptography.
 
+**How it works, step by step:** [docs/](docs/README.md) explains each scenario with diagrams and real example values.
+
 ## User journey
 
 | Who | Does | Passkey prompts |
