@@ -1,0 +1,32 @@
+{
+  "name": "secretbox",
+  "version": "0.1.0",
+  "description": "PoC: share confidential data with one-time invite links. Readers unlock it with a passkey (WebAuthn PRF + age).",
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,green \"node --watch server/index.ts\" \"vite\"",
+    "build": "vite build",
+    "start": "node server/index.ts",
+    "check": "tsc --noEmit",
+    "test": "vite build && node test/e2e.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.11",
+    "@scure/base": "^2.4.0",
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.1.0",
+    "age-encryption": "^0.3.1",
+    "hono": "^4.13.22"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.7",
+    "concurrently": "^10.0.7",
+    "puppeteer-core": "^25.19.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  }
+}
