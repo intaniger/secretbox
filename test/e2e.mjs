@@ -379,7 +379,7 @@ try {
   const before = nok.total();
   await unlock(nok);
   await nok.tab("items");
-  assert.deepEqual((await nok.openAll("From an outside system")).sort(), ["Armored answer", "Form answer #1"]);
+  assert.deepEqual((await nok.openAll("From another app")).sort(), ["Armored answer", "Form answer #1"]);
   assert.equal(nok.total() - before, 1, "opening a box should take exactly 1 passkey prompt");
   log("Nok returns, opens the box once (1 prompt), reads the form answers");
 
@@ -402,7 +402,7 @@ try {
   await tiger.waitText("Nok was removed");
   await nok.page.reload({ waitUntil: "networkidle0" });
   await nok.click("[data-test=unlock]");
-  await nok.waitText("does not open this box");
+  await nok.waitText("can't open this box anymore");
   log("Tiger removes Nok; Nok's passkey no longer opens the box");
 
   await tiger.tab("items");

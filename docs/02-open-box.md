@@ -95,7 +95,7 @@ Then the box page shows "This box is locked" and **Open with passkey**. One Face
 
 ## If the passkey was removed
 
-A member can remove Tiger. Then the server deletes his envelope. At step O3, the server answers "This passkey does not open this box". Tiger's passkey stays on his phone, but it opens nothing. See [flaw 2](08-security.md#2-removal-deletes-only-the-envelope).
+A member can remove Tiger. Then the server deletes his envelope. At step O3, the server answers "This passkey can't open this box anymore". Tiger's passkey stays on his phone, but it opens nothing. See [flaw 2](08-security.md#2-removal-deletes-only-the-envelope).
 
 ## Result
 

@@ -14,7 +14,7 @@ Any member can make an invite link. When the box is open, this needs no Face ID.
 2. Type "Nok". The link works for 24 hours. To change this, choose another time under **Link works for**.
 3. Select **Create link**.
 4. Select **Copy link**, or **Share…** on a phone. Send the link to Nok in a private chat. Then select **Done**: the link is shown only this one time.
-5. On the **People** tab, "Nok" shows under **Waiting to be used**, with **Cancel**.
+5. On the **People** tab, "Nok" shows under **Invites not used yet**, with **Cancel**.
 
 ## What happens, in plain words
 
@@ -97,7 +97,7 @@ dmlJPvQBuCydznNRdO5LHY6Z3KuHrfhbj4LsYshaQFA
 
 ## Cancel an invite
 
-Under **Waiting to be used**, any member can select **Cancel**. The server deletes the row, with the invite file. The link then opens nothing.
+Under **Invites not used yet**, any member can select **Cancel**. The server deletes the row, with the invite file. The link then opens nothing.
 
 ## Time limit
 

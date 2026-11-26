@@ -116,7 +116,7 @@ age -r age13aa297n0wgzsleu3hhsptlpjajl6a4cwyvhy3fzplhgfk0hsauqqlklqjx answer.txt
     "https://vlt.i7r.tech/api/ingest/nbtYKFvPJE6MnspnIVuu4Q"
 ```
 
-The age command does steps A1 to A6. It sends only the data file, with no label. So the members see the item as "From an outside system". A member can make a new add key. Then the old add key stops working.
+The age command does steps A1 to A6. It sends only the data file, with no label. So the members see the item as "From another app". A member can make a new add key. Then the old add key stops working.
 
 ## Part B: read the item
 

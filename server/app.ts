@@ -122,7 +122,7 @@ export function createApp(db: Db): Hono {
       "SELECT envelope FROM members WHERE box_id = ? AND credential_id = ?",
       c.req.param("id"), c.req.param("credentialId"),
     );
-    if (!row) bad("This passkey does not open this box. It was removed, or the box was deleted.", 404);
+    if (!row) bad("This passkey can't open this box anymore. You may have been removed, or the box was deleted.", 404);
     return c.json({ envelope: toB64(row!.envelope) });
   });
 

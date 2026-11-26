@@ -71,9 +71,9 @@ function say(message: string | null, kind: "info" | "error" | "ok" = "info") {
 }
 
 function explain(err: unknown): string {
-  if (err instanceof DOMException && err.name === "NotAllowedError") return "The passkey request was canceled or timed out.";
+  if (err instanceof DOMException && err.name === "NotAllowedError") return "The passkey prompt was canceled or timed out. Try again.";
   const msg = err instanceof Error ? err.message : String(err);
-  if (/no identity matched|failed to decrypt/i.test(msg)) return "This key doesn't open that data.";
+  if (/no identity matched|failed to decrypt/i.test(msg)) return "Your passkey can't open this.";
   return msg;
 }
 
@@ -185,7 +185,7 @@ function topbar(open?: vault.Box) {
       h("button", {
         class: "lock-button",
         "data-test": "lock",
-        title: "Lock this box in this tab. Your passkey opens it again.",
+        title: "Lock this box. You'll need your passkey to open it again.",
         onclick: () => { vault.lock(); go("/"); },
       }, icon("lock"), "Lock"),
   );
@@ -195,7 +195,7 @@ function topbar(open?: vault.Box) {
 function openButton(label: string, test: string) {
   const btn = h("button", { class: "primary block", "data-test": test }, icon("key"), label);
   btn.onclick = () =>
-    act(btn, "Choose the passkey for the box…", async () => {
+    act(btn, "Waiting for your passkey…", async () => {
       const boxId = await vault.openWithPasskey();
       say(null);
       if (pathBoxId() === boxId) await render(); // stay on this tab of the box
@@ -215,20 +215,20 @@ async function homeView() {
   const boxName = h("input", { placeholder: "Box name, e.g. Finance 2026", "aria-label": "Box name", "data-test": "box-name" });
   const createBtn = h("button", { type: "submit", "data-test": "create-box" }, "Create box");
   const create = form({ class: "card" }, () =>
-    act(createBtn, "Make the passkey for this box…", async () => {
+    act(createBtn, "Save the passkey when your device asks…", async () => {
       if (!boxName.value.trim()) throw Error("Type a name for the box.");
       go(`/box/${await vault.createBox(boxName.value.trim())}`);
     }),
     h("h2", {}, "Make a new box"),
     h("div", { class: "inline-form" }, boxName, createBtn),
-    h("p", { class: "hint" }, "Your device makes a passkey for this box. There is no account and no email."),
+    h("p", { class: "hint" }, "Your device will save a passkey for this box. You'll use it to open the box later."),
   );
 
   show(
     topbar(),
     h("section", { class: "hero" },
       h("h1", {}, "Share secrets with a one-time link."),
-      h("p", { class: "lead" }, "No accounts and no emails. Each box has its own passkey. The server keeps only locked data, so it can't read it."),
+      h("p", { class: "lead" }, "No account and no password. Everything is encrypted on your device, so not even Vault Box can read it."),
     ),
     openId && openName &&
       h("a", { href: `/box/${openId}`, onclick: link(`/box/${openId}`), class: "boxrow continue" },
@@ -237,7 +237,7 @@ async function homeView() {
         icon("chevron", "icon chev"),
       ),
     openButton("Open a box with passkey", "open-box"),
-    h("p", { class: "hint center" }, "Your device shows one passkey for each of your boxes. Choose one to open that box."),
+    h("p", { class: "hint center" }, "Your device shows a passkey for each of your boxes. Pick one, then use your fingerprint or face."),
     h("div", { class: "divider" }, h("span", {}, "or")),
     create,
   );
@@ -258,7 +258,7 @@ async function boxView(boxId: string, tab: Tab) {
       h("section", { class: "card gate" },
         icon("lock", "icon gate-icon"),
         h("h1", {}, "This box is locked"),
-        h("p", { class: "muted" }, "Open it with the passkey you made for this box. It stays open in this tab until you select Lock or close the tab."),
+        h("p", { class: "muted" }, "Open it with this box's passkey. It stays open until you lock it or close this tab."),
         openButton("Open with passkey", "unlock"),
       ),
     );
@@ -319,7 +319,7 @@ function addTools({ d, refresh }: BoxCtx): Child[] {
   const save = h("button", { type: "submit", class: "primary", "data-test": "add-note" }, "Save note");
   const cancel = h("button", {}, "Cancel");
   const composer = form({ class: "card composer", hidden: true }, () =>
-    act(save, "Locking…", async () => {
+    act(save, "Encrypting…", async () => {
       if (!text.value) throw Error("Write the note first.");
       const name = title.value.trim() || "Untitled note";
       await vault.addData(d, name, "text/plain", text.value);
@@ -346,7 +346,7 @@ function addTools({ d, refresh }: BoxCtx): Child[] {
   fileInput.onchange = () => {
     const f = fileInput.files?.[0];
     if (!f) return;
-    void act(upload, `Locking and uploading “${f.name}”…`, async () => {
+    void act(upload, `Encrypting and uploading “${f.name}”…`, async () => {
       try {
         if (f.size > MAX_UPLOAD) throw Error(`“${f.name}” is ${fmtSize(f.size)}. The limit is ${fmtSize(MAX_UPLOAD)}.`);
         await vault.addData(d, f.name, f.type, new Uint8Array(await f.arrayBuffer()));
@@ -360,14 +360,14 @@ function addTools({ d, refresh }: BoxCtx): Child[] {
 
   return [
     h("div", { class: "toolbar" }, newNote, upload, fileInput),
-    h("p", { class: "hint" }, "Notes, files and their names are locked on this device before upload."),
+    h("p", { class: "hint" }, "Notes, files and their names are encrypted on this device before they're uploaded."),
     composer,
   ];
 }
 
 function itemRow({ d, refresh }: BoxCtx, it: vault.Box["items"][number]) {
-  const name = it.label?.name ?? "From an outside system";
-  const by = it.label ? who(it.label.addedBy, d.me) : "outside system";
+  const name = it.label?.name ?? "From another app";
+  const by = it.label ? who(it.label.addedBy, d.me) : "another app";
   const isText = it.label ? it.label.type.startsWith("text/") || !hasExt(it.label.name) : false;
   const viewer = h("div", { class: "viewer", hidden: true });
   const row = h("button", { class: "item", "data-test": "open-item", "aria-expanded": "false" },
@@ -425,15 +425,15 @@ function itemRow({ d, refresh }: BoxCtx, it: vault.Box["items"][number]) {
 
 function integrationTab({ d, refresh }: BoxCtx): Child[] {
   const out = h("div", {});
-  const makeBtn = h("button", { "data-test": "create-token" }, d.hasAddKey ? "Replace add key" : "Make add key");
-  makeBtn.onclick = () => act(makeBtn, "Making add key…", async () => {
+  const makeBtn = h("button", { "data-test": "create-token" }, d.hasAddKey ? "Replace add key" : "Create add key");
+  makeBtn.onclick = () => act(makeBtn, "Creating add key…", async () => {
     if (d.hasAddKey && !confirm("Replace the add key? The old one stops working.")) return;
     const addKey = await vault.makeAddKey();
     const cmd = `age -r ${d.publicKey} answer.txt \\\n  | curl --data-binary @- \\\n    -H "Authorization: Bearer ${addKey}" \\\n    "${location.origin}/api/ingest/${d.id}"`;
     out.replaceChildren(
-      h("p", { class: "small" }, h("strong", {}, "Copy the add key now. "), "It is shown only once."),
+      h("p", { class: "small" }, h("strong", {}, "Copy the add key now. "), "It won't be shown again."),
       h("pre", { "data-test": "token" }, addKey),
-      h("p", { class: "small muted" }, "Example with the age command-line tool:"),
+      h("p", { class: "small muted" }, "For developers, an example with the age command-line tool:"),
       h("pre", {}, cmd),
     );
   });
@@ -445,13 +445,13 @@ function integrationTab({ d, refresh }: BoxCtx): Child[] {
 
   return [
     h("section", { class: "card", "data-test": "connect" },
-      h("h2", {}, "Let a form or script add items"),
-      h("p", { class: "muted small" }, "An outside system can add items with the box public key and an add key. It can't read anything."),
-      h("div", { class: "label" }, "Box public key"),
+      h("h2", {}, "Let another app add items"),
+      h("p", { class: "muted small" }, "A form or another app can put items in this box. It needs the public key and an add key below. It can add items, but it can't read anything."),
+      h("div", { class: "label" }, "Public key (safe to share)"),
       h("pre", { "data-test": "box-recipient" }, d.publicKey),
       h("div", { class: "buttons" }, copyButton(d.publicKey, "Copy public key")),
-      h("div", { class: "label spaced" }, "Add key"),
-      h("p", { class: "small" }, d.hasAddKey ? "On. An outside system with the add key can add items." : "Off. There is no add key yet."),
+      h("div", { class: "label spaced" }, "Add key (keep it secret)"),
+      h("p", { class: "small" }, d.hasAddKey ? "On. An app with the add key can add items." : "Off. No app can add items yet."),
       h("div", { class: "buttons" }, makeBtn, offBtn),
       out,
     ),
@@ -469,7 +469,7 @@ function peopleTab(ctx: BoxCtx): Child[] {
       const them = m.name || "the box creator";
       const rm = !m.isMe && h("button", { class: "link danger", "data-test": `remove-${m.name}` }, "Remove");
       if (rm) rm.onclick = () => act(rm, "Removing…", async () => {
-        if (!confirm(`Remove ${them}? Their passkey stops opening this box. If they copied the box key, they keep it: to cut someone off fully, make a new box.`)) return;
+        if (!confirm(`Remove ${them}? They won't be able to open this box anymore. Anything they already saw or saved, they keep. To be fully safe, make a new box.`)) return;
         await vault.removeMember(m.credentialId);
         await refresh();
         say(`${cap(them)} was removed.`, "ok");
@@ -487,7 +487,7 @@ function peopleTab(ctx: BoxCtx): Child[] {
   );
 
   const pending = d.invites.length > 0 && h("section", { class: "card" },
-    h("h2", {}, "Waiting to be used"),
+    h("h2", {}, "Invites not used yet"),
     h("ul", { class: "list", "data-test": "invites" },
       ...d.invites.map((i) => {
         const cancel = h("button", { class: "link danger", "data-test": `cancel-${i.name}` }, "Cancel");
@@ -560,7 +560,7 @@ function shareDialog({ d, refresh }: BoxCtx) {
     try {
       const url = await vault.createInvite(d, them, Number(ttl.value));
       // Update the page behind the dialog now (the new invite shows under
-      // "Waiting to be used"), so closing the dialog changes nothing under the
+      // "Invites not used yet"), so closing the dialog changes nothing under the
       // pointer. If that fails, still show the link: the invite exists.
       await refresh().catch(console.error);
       dialog.replaceChildren(linkReady(them, url));
@@ -586,7 +586,7 @@ function shareDialog({ d, refresh }: BoxCtx) {
       h("h2", { id: "share-title" }, `The link for ${them} is ready`),
       h("p", { class: "callout", "data-test": "link-once" },
         h("strong", {}, "Copy it now. It won't be shown again."),
-        "Your browser made this link, and the server never stores it. Once you close this, it's gone.",
+        "This link was made on your device, and Vault Box never stores it. Once you close this, it's gone.",
       ),
       h("p", { class: "muted small" }, `Send it to ${them} in a private chat. It works one time.`),
       h("input", { readOnly: true, value: url, "aria-label": "Invite link", "data-test": "invite-link", onfocus: (e: Event) => (e.target as HTMLInputElement).select() }),
@@ -648,9 +648,9 @@ async function joinView(inviteId: string) {
   }
 
   const inv = openedInvite;
-  const accept = h("button", { class: "primary block", "data-test": "accept" }, icon("key"), "Accept and make passkey");
+  const accept = h("button", { class: "primary block", "data-test": "accept" }, icon("key"), "Accept and save passkey");
   accept.onclick = () =>
-    act(accept, "Make your passkey for this box…", async () => {
+    act(accept, "Save the passkey when your device asks…", async () => {
       const boxId = await vault.join(inv);
       openedInvite = null;
       // Drop the one-time key from the address bar and the history entry.
@@ -663,7 +663,7 @@ async function joinView(inviteId: string) {
     h("h1", {}, inv.invitedBy ? `${inv.invitedBy} invited you to “${inv.boxName}”` : `You're invited to “${inv.boxName}”`),
     h("p", { class: "muted", "data-test": "invite-as" }, `You will appear as ${inv.name} in this box.`),
     accept,
-    h("p", { class: "hint" }, "Nothing to fill in, and no email. Your device makes a passkey for this box."),
+    h("p", { class: "hint" }, "Nothing to fill in. Your device will save a passkey for this box. You'll use it to open the box later."),
   );
 }
 

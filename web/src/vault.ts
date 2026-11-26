@@ -44,7 +44,7 @@ const unlockJson = async <T>(identity: string, b64: string): Promise<T> =>
  */
 async function checkPublicKey(identity: string, publicKey: string) {
   if ((await keys.publicKeyOf(identity)) !== publicKey) {
-    throw Error("The server gave a wrong public key for this box. Do not add data, and tell the other members.");
+    throw Error("Vault Box sent the wrong key for this box, so it isn't safe to use. Don't add anything, and tell the other people in this box.");
   }
 }
 

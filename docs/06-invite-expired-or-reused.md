@@ -59,7 +59,7 @@ sequenceDiagram
 
 This case is different. The link goes to a group chat by mistake. Mallory opens it **before** Nok.
 
-1. Mallory selects **Open invite**, then **Accept and make passkey**. She joins the box.
+1. Mallory selects **Open invite**, then **Accept and save passkey**. She joins the box.
 2. The member list shows her as "Nok", invited by the box creator, because Tiger typed the name "Nok".
 3. Later, the real Nok opens the link. She sees "already used".
 

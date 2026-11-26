@@ -21,7 +21,7 @@ const challenge = () => crypto.getRandomValues(new Uint8Array(32)); // nobody ch
 export type Passkey = { credentialId: string; boxId: string; key: keys.KeyPair };
 
 const NO_PRF =
-  "This passkey can't unlock data (no PRF support). Use Apple Passwords, Google Password Manager, or a recent security key.";
+  "This passkey can't encrypt data. Save it in Apple Passwords or Google Password Manager, or use a recent security key.";
 
 function prfOutput(cred: PublicKeyCredential): Uint8Array | undefined {
   const first = (cred.getClientExtensionResults() as any).prf?.results?.first as ArrayBuffer | ArrayBufferView | undefined;

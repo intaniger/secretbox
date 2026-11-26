@@ -6,7 +6,7 @@
 
 Nok gets the link from Tiger. She opens it and selects **Open invite**. The server gives the invite file one time, and then deletes it. Nok's browser unlocks it with the key from the link. Now it has the box private key.
 
-Nok sees the box name, and her name in the box. She types nothing. She selects **Accept and make passkey**. Her phone makes a passkey for this box, and her browser locks her own envelope.
+Nok sees the box name, and her name in the box. She types nothing. She selects **Accept and save passkey**. Her phone makes a passkey for this box, and her browser locks her own envelope.
 
 Nok uses Face ID one time. Some devices ask two times.
 
@@ -15,7 +15,7 @@ Nok uses Face ID one time. Some devices ask two times.
 1. Open the link from Tiger. The page says "You're invited to a box".
 2. Select **Open invite**.
 3. The page says: "You're invited to “Finance 2026”. You will appear as Nok in this box." It does not name Tiger: nobody gave the box creator a name, and Nok knows who sent the link. There is nothing to fill in.
-4. Select **Accept and make passkey**.
+4. Select **Accept and save passkey**.
 5. The phone asks to save a passkey with the name "Finance 2026 – Nok". Confirm with Face ID.
 6. The box opens. Nok can read the note. The member list shows "Nok (you)", invited by the box creator.
 
@@ -49,7 +49,7 @@ sequenceDiagram
   B->>S: J6. GET /api/boxes/BOX_ID with the access key
   S-->>B: Box public key, box name file
   B->>N: You're invited to Finance 2026. You will appear as Nok
-  N->>B: Accept and make passkey
+  N->>B: Accept and save passkey
   B->>P: J7. Make a passkey. User ID = box ID. PRF input
   N->>P: Face ID
   P-->>B: Credential ID and PRF output
@@ -114,7 +114,7 @@ Chat apps (LINE, Slack, iMessage) load a link to show a preview. They send `GET`
 |---|---|
 | Before **Open invite** | Nothing changed. The link still works. |
 | After **Open invite**, and she reloads the page | The tab still has the locked invite file. The page shows the invite again. |
-| After **Open invite**, and she cancels Face ID | She selects **Accept and make passkey** again. |
+| After **Open invite**, and she cancels Face ID | She selects **Accept and save passkey** again. |
 | After **Open invite**, and she closes the tab | The claim used up the link. Nobody joined. A member must make a new link. |
 
 ## Result
