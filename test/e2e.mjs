@@ -8,7 +8,7 @@
 //   CHROME_PATH=/path/to/chrome npm test
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -30,10 +30,24 @@ const CHROME =
 if (!CHROME) throw Error("Chrome not found. Set CHROME_PATH.");
 
 // SCREENSHOTS=1 saves phone-size screenshots to test-results/.
+// SCREENSHOTS=all saves light and dark ones, at phone and desktop size.
+const PHONE = { width: 390, height: 844, deviceScaleFactor: 2 };
 const shot = async (p, file) => {
   if (!process.env.SCREENSHOTS) return;
   mkdirSync("test-results", { recursive: true });
+  const all = process.env.SCREENSHOTS === "all";
+  if (all) await p.page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
   await p.page.screenshot({ path: `test-results/${file}`, fullPage: true });
+  if (!all) return;
+  const base = file.replace(/\.png$/, "");
+  await p.page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
+  await p.page.screenshot({ path: `test-results/${base}-dark.png`, fullPage: true });
+  await p.page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 });
+  await p.page.screenshot({ path: `test-results/${base}-desktop-dark.png`, fullPage: true });
+  await p.page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
+  await p.page.screenshot({ path: `test-results/${base}-desktop.png`, fullPage: true });
+  await p.page.emulateMediaFeatures();
+  await p.page.setViewport(PHONE);
 };
 
 let step = 0;
@@ -80,7 +94,7 @@ async function person(name, { prfAtCreate = true } = {}) {
       };
     });
   }
-  await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2 });
+  await page.setViewport(PHONE);
   const cdp = await page.createCDPSession();
   await cdp.send("WebAuthn.enable");
   const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
@@ -115,6 +129,27 @@ async function person(name, { prfAtCreate = true } = {}) {
     },
     click: (sel) => page.click(sel),
     text: (sel) => page.$eval(sel, (el) => el.textContent),
+    /** Goes to a tab of the box page ("items" or "people"). */
+    tab: async (name) => {
+      await page.click(`[data-test=tab-${name}]`);
+      await page.waitForSelector(`[data-test=tab-${name}][aria-current=page]`);
+    },
+    /** Waits until the item list shows an item with this name (or, with gone=true, doesn't). */
+    waitItem: (itemName, gone = false) =>
+      page.waitForFunction(
+        (n, g) => [...document.querySelectorAll("[data-test=items] .row-main")].some((e) => e.textContent === n) !== g,
+        { timeout: 15000 },
+        itemName,
+        gone,
+      ),
+    /** Opens the note composer and saves a note. */
+    addNote: async (title, text) => {
+      await page.click("[data-test=new-note]");
+      await p.type("[data-test=note-name]", title);
+      await p.type("[data-test=note-text]", text);
+      await page.click("[data-test=add-note]");
+      await p.waitItem(title);
+    },
     waitText: (text, timeout = 15000) =>
       page.waitForFunction((t) => document.body.innerText.includes(t), { timeout }, text),
     /** Clicks "Open" on the item with this name and returns its decrypted text. */
@@ -167,6 +202,7 @@ async function person(name, { prfAtCreate = true } = {}) {
 
 /** Any member can invite. The inviter types the name; there is no role. */
 async function createInvite(member, name) {
+  if (!member.page.url().endsWith("/people")) await member.tab("people");
   await member.type("[data-test=invite-name]", name);
   await member.page.$eval("[data-test=invite-link]", (el) => el.remove()).catch(() => {});
   await member.click("[data-test=create-invite]");
@@ -224,11 +260,28 @@ try {
   log(`Tiger creates a box: no account, one new passkey (${MAKE} prompt)`);
   const boxId = new URL(tiger.page.url()).pathname.split("/").pop();
 
-  await tiger.type("[data-test=note-text]", "Salary sheet: Nok 50k");
-  await tiger.click("[data-test=add-note]");
-  await tiger.waitText("note.txt");
+  await tiger.addNote("note.txt", "Salary sheet: Nok 50k");
   assert.equal(tiger.total(), MAKE, "adding data should need no passkey prompt");
   log("Tiger adds a note (0 prompts, locked in the browser)");
+
+  // Upload: choosing a file uploads it at once. Then open it and delete it.
+  const uploadDir = join(tmpdir(), `secretbox-e2e-upload-${process.pid}`);
+  mkdirSync(uploadDir, { recursive: true });
+  writeFileSync(join(uploadDir, "contract.txt"), "Uploaded file body");
+  await (await tiger.page.$("[data-test=file-input]")).uploadFile(join(uploadDir, "contract.txt"));
+  await tiger.waitItem("contract.txt");
+  assert.equal(await tiger.open("contract.txt"), "Uploaded file body");
+  await shot(tiger, "2-items.png");
+  await tiger.page.evaluate(() =>
+    [...document.querySelectorAll("[data-test=items] > li")]
+      .find((li) => li.querySelector(".row-main")?.textContent === "contract.txt")
+      .querySelector("[data-test=delete-item]")
+      .click(),
+  );
+  await tiger.waitItem("contract.txt", true);
+  rmSync(uploadDir, { recursive: true, force: true });
+  assert.equal(tiger.total(), MAKE, "an open box opens and deletes items with no passkey prompt");
+  log("Tiger uploads a file, opens it and deletes it (0 prompts)");
 
   const nokLink = await createInvite(tiger, "Nok");
   await shot(tiger, "2-invite.png");
@@ -236,6 +289,12 @@ try {
   assert.match(nokLink, new RegExp(`^${BASE}/join/[\\w-]+#AGE-SECRET-KEY-1[0-9A-Z]+$`));
   assert.equal(tiger.total(), MAKE, "inviting should need no passkey prompt");
   log("Tiger makes 2 invite links, typing only a name (one-time key after #)");
+
+  await createInvite(tiger, "Temp");
+  await tiger.click("[data-test=cancel-Temp]");
+  await tiger.page.waitForFunction(() => !document.querySelector("[data-test=cancel-Temp]"));
+  assert.equal(await tiger.page.$("[data-test=invite-link]"), null, "a canceled link must not stay on screen");
+  log("Tiger cancels a new invite at once; its link leaves the screen");
 
   // A link preview bot fetches the page: that is a GET, and only a POST uses the invite.
   const preview = await fetch(nokLink.split("#")[0]);
@@ -247,7 +306,8 @@ try {
   assert.equal(nok.total(), MAKE, "joining should take the same prompts as making a box");
   assert.ok(!nok.page.url().includes("#"), "the one-time key should be removed from the URL");
   assert.equal(await nok.open("note.txt"), "Salary sheet: Nok 50k");
-  assert.match(await memberRow(nok, "Nok"), /invited by Tiger/);
+  await nok.tab("people");
+  assert.match(await memberRow(nok, "Nok"), /Invited by Tiger/);
   await shot(nok, "4-member-box.png");
   log("Nok opens the invite, reloads, sees who invited her, joins without typing anything");
 
@@ -259,10 +319,8 @@ try {
   log("Mallory opens Nok's link again: 'already used' (the server deleted it)");
 
   // No roles: Nok can add data and invite people herself.
-  await nok.type("[data-test=note-name]", "nok.txt");
-  await nok.type("[data-test=note-text]", "Added by Nok");
-  await nok.click("[data-test=add-note]");
-  await nok.waitText("nok.txt");
+  await nok.tab("items");
+  await nok.addNote("nok.txt", "Added by Nok");
   const promptsBeforeInvite = nok.total();
   const beeLink = await createInvite(nok, "Bee");
   assert.equal(nok.total() - promptsBeforeInvite, 0, "Nok's box is open, so inviting needs no prompt");
@@ -271,15 +329,20 @@ try {
   const bee = await person("Bee", { prfAtCreate: false });
   await joinWith(bee, beeLink, "Bee", "Nok");
   assert.equal(bee.total(), 2, "without PRF at creation, joining takes 2 prompts");
-  assert.match(await memberRow(bee, "Bee"), /invited by Nok/);
+  await bee.tab("people");
+  assert.match(await memberRow(bee, "Bee"), /Invited by Nok/);
+  await bee.tab("items");
   assert.equal(await bee.open("nok.txt"), "Added by Nok");
   log("Bee joins with Nok's link (2 prompts on her device) and shows as 'invited by Nok'");
 
   // --- Outside system adds data with only the public key + an add key
   await tiger.page.reload({ waitUntil: "networkidle0" });
   await unlock(tiger);
+  await tiger.tab("items");
+  await tiger.click("[data-test=connect] summary");
   await tiger.click("[data-test=create-token]");
   await tiger.page.waitForSelector("[data-test=token]");
+  await shot(tiger, "2-connect.png");
   const addKey = (await tiger.text("[data-test=token]")).trim();
   const recipient = (await tiger.text("[data-test=box-recipient]")).trim();
   const ingest = (body, key = addKey) =>
@@ -300,8 +363,10 @@ try {
   await nok.page.reload({ waitUntil: "networkidle0" });
   assert.equal(await nok.text("[data-test=lock-state]"), "Locked");
   assert.equal(await nok.page.$("[data-test=items]"), null, "a locked box shows nothing");
+  await shot(nok, "4-locked.png");
   const before = nok.total();
   await unlock(nok);
+  await nok.tab("items");
   assert.deepEqual((await nok.openAll("From an outside system")).sort(), ["Armored answer", "Form answer #1"]);
   assert.equal(nok.total() - before, 1, "opening a box should take exactly 1 passkey prompt");
   log("Nok returns, opens the box once (1 prompt), reads the form answers");
@@ -309,6 +374,8 @@ try {
   // --- Cancel an invite: its row and invite file are deleted.
   await tiger.page.reload({ waitUntil: "networkidle0" });
   await unlock(tiger);
+  await tiger.tab("people");
+  await shot(tiger, "6-people.png");
   await tiger.click("[data-test=cancel-Spare]");
   await tiger.page.waitForFunction(() => !document.querySelector("[data-test=cancel-Spare]"));
   await mallory.goto(spareLink);
@@ -324,19 +391,27 @@ try {
   await nok.waitText("does not open this box");
   log("Tiger removes Nok; Nok's passkey no longer opens the box");
 
-  await tiger.type("[data-test=note-name]", "after.txt");
-  await tiger.type("[data-test=note-text]", "Written after Nok left");
-  await tiger.click("[data-test=add-note]");
-  await tiger.waitText("after.txt");
+  await tiger.tab("items");
+  await tiger.addNote("after.txt", "Written after Nok left");
   await bee.page.reload({ waitUntil: "networkidle0" });
   await unlock(bee);
   assert.equal(await bee.open("note.txt"), "Salary sheet: Nok 50k");
   assert.equal(await bee.open("after.txt"), "Written after Nok left");
   log("Bee still reads old and new data, with nothing to do");
 
+  // --- The start page leads back to the box that is open in this tab
+  await bee.click(".brand");
+  await bee.page.waitForSelector("a.continue");
+  await shot(bee, "1-home-open.png");
+  assert.match(await bee.text("a.continue"), /Finance 2026/);
+  await bee.click("a.continue");
+  await bee.page.waitForSelector("[data-test=box-title]");
+  log("From the start page, Bee goes back to the box that is open in this tab");
+
   // --- Lock, then open again from the start page
   await bee.click("[data-test=lock]");
   await bee.page.waitForSelector("[data-test=open-box]");
+  await shot(bee, "1-home.png");
   const beforeOpen = bee.total();
   await bee.click("[data-test=open-box]");
   await bee.waitText("Finance 2026");

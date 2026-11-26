@@ -14,14 +14,16 @@ Tiger adds a note to "Finance 2026": `Salary sheet: Nok 50k`.
 
 To add:
 
-1. Open the box "Finance 2026".
-2. Type the note. Select **Lock and add note**.
-3. The note shows in the list, with its name, size, "Tiger" and the date.
+1. Open the box "Finance 2026". The **Items** tab shows.
+2. Select **New note**. Type a title and the note. Select **Save note**.
+3. The note shows in the list, with its title, size, "Tiger" and the date.
+
+To add a file, select **Upload file** and choose the file. The upload starts immediately.
 
 To read:
 
-1. Select **Open** next to the note.
-2. The note shows.
+1. Select the note in the list.
+2. The note shows below its title.
 
 ## Part A: add the item
 
@@ -40,7 +42,7 @@ sequenceDiagram
   participant B as Browser
   participant S as Server
   Note over B: The box is open. The browser has the box public key and the access key
-  T->>B: Note text, Lock and add note
+  T->>B: Title, note text, Save note
   Note over B: A1–A6. Lock the label. Lock the note
   B->>S: A7. POST /api/boxes/BOX_ID/items with the access key. Two age files
   Note over S: Check the access key. Check that both parts are age files. Keep them
@@ -104,7 +106,7 @@ The label file looks the same, with different values. The server cannot see the 
 
 ### Another system adds an item
 
-A form tool or a script can add items too. A member makes an **add key** for it under **Outside systems**. The server keeps only the SHA-256 hash of the add key, for example `f380ac83935d686b…`.
+A form tool or a script can add items too. A member makes an **add key** for it under **Let a form or script add items**, at the bottom of the **Items** tab. The server keeps only the SHA-256 hash of the add key, for example `f380ac83935d686b…`.
 
 The other system needs the box public key and the add key. It cannot read, list or delete items, because it has no private key and no access key.
 
@@ -132,7 +134,7 @@ sequenceDiagram
   actor T as Tiger
   participant B as Browser
   participant S as Server
-  T->>B: Open
+  T->>B: Select the item
   B->>S: B1. GET /api/boxes/BOX_ID/items/ITEM_ID with the access key
   S-->>B: The data file, 221 bytes
   Note over B: B2. Unlock it with the box private key

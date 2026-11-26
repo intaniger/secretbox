@@ -21,7 +21,7 @@ Encryption is [age](https://age-encryption.org) via [Typage](https://github.com/
 | Tiger | Creates an invite link for "Nok" and sends it in a private chat | 0 |
 | Nok | Opens the link, taps **Open invite**, sees "Tiger invited you", taps **Accept**. Nothing to type | 1 (2 on some devices) |
 | Nok | Invites Bee herself. Bee shows as "invited by Nok" | 0 |
-| Nok | Comes back later: **Open with passkey**, picks "Finance 2026 – Nok" | 1 per visit |
+| Nok | Comes back later: **Open a box with passkey**, picks "Finance 2026 – Nok" | 1 per visit |
 | A form tool | Adds data with the box's public key and an add key | — |
 | Any member | Removes someone: their passkey stops opening the box | 0 |
 
@@ -36,7 +36,7 @@ Box key — one per box, age X25519
   └─ gives the ACCESS KEY                HMAC-SHA-256(box private key, label); the server stores its hash
 ```
 
-- **One passkey per box.** Its user ID is the box ID. "Open with passkey" shows all your passkeys for the site; the one you pick tells the app which box to open and gives the PRF output, in one Face ID. A new device that syncs passkeys (iCloud, Google) needs nothing.
+- **One passkey per box.** Its user ID is the box ID. "Open a box with passkey" shows all your passkeys for the site; the one you pick tells the app which box to open and gives the PRF output, in one Face ID. A new device that syncs passkeys (iCloud, Google) needs nothing.
 - **Access by possession.** Whoever holds the box private key is a member. The browser derives the *access key* from it and sends it as `Authorization: Bearer`. There are no sessions, cookies or server-side passkey checks.
 - **Adding data needs no secret.** Data is locked to the box's public `age1…` key. That's why outside systems can add data but never read it.
 - **Invite links.** The browser locks the box private key and the two names to a new one-time age key. The one-time secret key goes after `#` in the link: `/join/{id}#AGE-SECRET-KEY-1…`. Browsers never send the `#` part to the server.
@@ -89,7 +89,7 @@ The project deploys with the [Build Output API](https://vercel.com/docs/build-ou
 
 ## Add data from another system
 
-In the box page, any member makes an **add key** under **Outside systems**. A new add key replaces the old one; **Turn off** removes it. Then, with the [age CLI](https://github.com/FiloSottile/age):
+In the box page, any member makes an **add key** under **Let a form or script add items**, at the bottom of the **Items** tab. A new add key replaces the old one; **Turn off** removes it. Then, with the [age CLI](https://github.com/FiloSottile/age):
 
 ```sh
 age -r age1…box-public-key… answer.txt \

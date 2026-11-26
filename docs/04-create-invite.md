@@ -10,11 +10,11 @@ Any member can make an invite link. When the box is open, this needs no Face ID.
 
 ## What Tiger sees
 
-1. In the box, go to **Invite someone**.
-2. Type "Nok". Select how long the link works, for example 24 hours.
-3. Select **Create invite link**.
-4. Copy the link. Send it to Nok in a private chat.
-5. "Nok" shows under **Open invites**, with **Cancel**.
+1. In the box, select the **People** tab.
+2. Under **Invite someone**, type "Nok". The link works for 24 hours. To change this, select **Change**.
+3. Select **Create link**.
+4. Select **Copy link**, or **Share** on a phone. Send the link to Nok in a private chat.
+5. "Nok" shows under **Waiting to be used**, with **Cancel**.
 
 ## What happens, in plain words
 
@@ -32,7 +32,7 @@ sequenceDiagram
   actor T as Tiger
   participant B as Browser
   participant S as Server
-  T->>B: Nok, 24 hours, Create invite link
+  T->>B: Nok, 24 hours, Create link
   Note over B: I1. One-time key pair. I2. Contents. I3. Invite file. I4. Name file
   B->>S: I5. POST /api/boxes/BOX_ID/invites with the access key
   Note over S: Keep the invite file, the name file and the time limit
@@ -97,7 +97,7 @@ HLi84QWv0c9SIDNFL4e9WNVVBjClKgvktmK1YUIM3sI
 
 ## Cancel an invite
 
-Under **Open invites**, any member can select **Cancel**. The server deletes the row, with the invite file. The link then opens nothing.
+Under **Waiting to be used**, any member can select **Cancel**. The server deletes the row, with the invite file. The link then opens nothing.
 
 ## Time limit
 
