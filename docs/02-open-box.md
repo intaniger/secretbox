@@ -85,13 +85,16 @@ flowchart TD
 
 ## Lock, reload and close
 
-The box private key and the access key stay in tab memory only. They go away when:
+The box private key and the access key stay in tab memory only. Where the browser has X25519 in WebCrypto, the box private key is a key object that cannot be exported: scripts can use it while the box is open, but cannot copy it. The keys go away when:
 
 - Tiger selects **Lock**,
-- Tiger reloads the page,
-- Tiger closes the tab.
+- nobody uses the tab for 5 minutes,
+- the tab is hidden for 2 minutes: another tab, a minimized window, or another app on a phone,
+- Tiger reloads the page, goes to another site, or closes the tab.
 
 Then the box page shows "This box is locked" and **Open with passkey**. One Face ID opens it again.
+
+Lock also removes everything else that the tab got from the box: the screen, the last message (it can name an item) and the download links. The **Lock** button also clears text that Vault Box copied to the clipboard. An automatic lock tries to do this too, but browsers often block it. The page tells the browser not to keep a copy of itself (`Cache-Control: no-store`), so the **Back** button shows the page locked.
 
 ## If the passkey was removed
 
@@ -102,13 +105,14 @@ A member can remove Tiger. Then the server deletes his envelope. At step O3, the
 | Where | What |
 |---|---|
 | Server | Nothing changes. |
-| Browser tab memory | The box private key and the access key, until **Lock**, a reload or a closed tab. |
+| Browser tab memory | The box private key and the access key, until the box locks. |
 
 | Action | Face ID |
 |---|---|
 | Open a box | 1 |
-| Read, add, invite, remove while the box is open | 0 |
-| Open the box again after **Lock**, a reload or a closed tab | 1 |
+| Read, add, remove while the box is open | 0 |
+| Make an invite link | 1 |
+| Open the box again after it locks | 1 |
 
 ## Technical details
 

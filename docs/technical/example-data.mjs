@@ -190,7 +190,7 @@ const checks = {
   tigerKeyMatchesApp: (await appKeyOf(tigerKey)) === tigerKey.recipient,
   nokKeyMatchesApp: (await appKeyOf(nokKey)) === nokKey.recipient,
   tigerKeyMatchesTypage: (await age.identityToRecipient(tigerKey.identity)) === tigerKey.recipient,
-  accessKeyMatchesApp: (await appKeys.accessKey(financeBox.identity)) === financeAccess.key,
+  accessKeyMatchesApp: (await appKeys.holdBoxKey(financeBox.identity)).access === financeAccess.key,
   tigerEnvelope: (await openWith(tigerKey.identity, tigerEnvelope.file)) === financeBox.identity,
   tigerHrEnvelope: (await openWith(tigerHrKey.identity, tigerHrEnvelope.file)) === hrBox.identity,
   financeName: (await openWith(financeBox.identity, financeName.file)) === "Finance 2026",

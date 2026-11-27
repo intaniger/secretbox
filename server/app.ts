@@ -281,10 +281,13 @@ export function createApp(db: Db): Hono {
 }
 
 // The page decrypts data, so a strict CSP matters: no inline or third-party scripts.
+// no-store: the browser keeps no copy of the page, so Back after leaving the
+// site loads it fresh (and locked) where browsers respect it for the back/forward cache.
 export const HTML_HEADERS: Record<string, string> = {
   "content-security-policy":
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; " +
     "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
+  "cache-control": "no-store",
 };

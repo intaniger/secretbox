@@ -77,16 +77,23 @@ function explain(err: unknown): string {
   return msg;
 }
 
-/** Runs an action with a busy button and a status line; shows errors. */
-async function act(btn: HTMLButtonElement | null, status: string, fn: () => Promise<void>) {
+/**
+ * Runs an action with a busy button and a status line; shows errors. `fn` can
+ * return a message to show when it is done. If the box locks while it runs,
+ * nothing is shown: the message can name an item, and the screen is locked.
+ */
+async function act(btn: HTMLButtonElement | null, status: string, fn: () => Promise<string | void>) {
+  const gen = generation;
   if (btn) btn.disabled = true;
   say(status);
   try {
-    await fn();
-    if (notice.classList.contains("info")) say(null);
+    const done = await fn();
+    if (gen !== generation) return;
+    if (done) say(done, "ok");
+    else if (notice.classList.contains("info")) say(null);
   } catch (err) {
     console.error(err);
-    say(explain(err), "error");
+    if (gen === generation) say(explain(err), "error");
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -97,11 +104,33 @@ function form(props: Props, onSubmit: () => void, ...children: Child[]) {
   return h("form", { ...props, onsubmit: (e: Event) => { e.preventDefault(); onSubmit(); } }, ...children);
 }
 
-function copyButton(text: string, label = "Copy", props: Props = {}) {
+/**
+ * A secret this page put on the clipboard is removed after a minute, if the
+ * page still has focus (browsers allow no clipboard writes otherwise), and at
+ * Lock. Clipboard history apps may keep their own copy: the web can't stop that.
+ */
+const CLIPBOARD_MS = 60_000;
+let copiedSecret = false;
+let clipboardTimer = 0;
+
+function forgetClipboard() {
+  if (!copiedSecret) return;
+  copiedSecret = false;
+  clearTimeout(clipboardTimer);
+  navigator.clipboard.writeText("").catch(() => {});
+}
+
+/** `secret: false` for text that is safe to keep, such as the public key. */
+function copyButton(text: string, label = "Copy", props: Props = {}, secret = true) {
   const b = h("button", props, icon("copy"), label);
   b.onclick = async () => {
     try {
       await navigator.clipboard.writeText(text);
+      if (secret) {
+        copiedSecret = true;
+        clearTimeout(clipboardTimer);
+        clipboardTimer = window.setTimeout(() => document.hasFocus() && forgetClipboard(), CLIPBOARD_MS);
+      }
       b.replaceChildren(icon("check"), "Copied");
       setTimeout(() => b.replaceChildren(icon("copy"), label), 2000);
     } catch {
@@ -109,6 +138,45 @@ function copyButton(text: string, label = "Copy", props: Props = {}) {
     }
   };
   return b;
+}
+
+/**
+ * A field where people type secrets or private names. The text stays on this
+ * device: no cloud spellcheck (Chrome's Enhanced Spell Check, Edge's Microsoft
+ * Editor), no grammar add-ons (Grammarly) and no saved form history. `exact`
+ * also turns off autocorrect and capitals, for a password that must stay as typed.
+ * h() can't set these: it skips `false`, and `spellcheck` is a boolean property.
+ */
+function keepLocal<T extends HTMLElement>(el: T, exact = false): T {
+  el.setAttribute("spellcheck", "false");
+  el.setAttribute("autocomplete", "off");
+  el.setAttribute("writingsuggestions", "false");
+  el.setAttribute("data-gramm", "false");
+  el.setAttribute("data-gramm_editor", "false");
+  el.setAttribute("data-enable-grammarly", "false");
+  if (exact) {
+    el.setAttribute("autocorrect", "off");
+    el.setAttribute("autocapitalize", "off");
+  }
+  return el;
+}
+
+/**
+ * Saves decrypted bytes as a file. The object URL exists only for this
+ * download, not for as long as the item is open, and Lock revokes it.
+ * Always application/octet-stream: the type in a label is what a member typed.
+ */
+function saveFile(bytes: Uint8Array, name: string) {
+  const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" }));
+  blobUrls.add(url);
+  const a = h("a", { href: url, download: name, hidden: true });
+  document.body.append(a); // some browsers ignore a click on a detached link
+  a.click();
+  a.remove();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+    blobUrls.delete(url);
+  }, 30_000);
 }
 
 const MAX_UPLOAD = 4 * 1024 * 1024; // the server's limit (MAX_ITEM_BYTES)
@@ -149,6 +217,88 @@ function go(path: string) {
 }
 
 window.addEventListener("popstate", () => void render());
+// The invite link opened again in this tab: only its "#" part is new.
+window.addEventListener("hashchange", () => void render());
+
+// ---------------------------------------------------------------------------
+// Lock and auto-lock
+
+/** Goes up at each lock. Work that started before a lock sees it, and draws nothing. */
+let generation = 0;
+/** Object URLs of decrypted files (saveFile). */
+const blobUrls = new Set<string>();
+
+/**
+ * Forgets everything secret that this tab holds: the box key, an opened
+ * invite and its one-time key, decrypted files, names on screen, and a
+ * secret this page copied. Runs at Lock, at auto-lock, and when the page goes away.
+ */
+function teardown() {
+  generation++;
+  vault.lock();
+  openedInvite = null;
+  pendingInvite = null;
+  for (const url of blobUrls) URL.revokeObjectURL(url);
+  blobUrls.clear();
+  forgetClipboard();
+  say(null);
+  document.querySelectorAll("dialog").forEach((d) => d.remove());
+  app.replaceChildren();
+}
+
+/** An open box locks after this long with no input, or this long in another tab or app. */
+const IDLE_LOCK_MS = 5 * 60_000;
+const AWAY_LOCK_MS = 2 * 60_000;
+/**
+ * An opened invite can't be opened again (the server deleted it), so it gets
+ * more time before it is closed. After that, the person needs a new link.
+ */
+const INVITE_LOCK_MS = 10 * 60_000;
+
+let lastInput = Date.now();
+let hiddenSince: number | null = null;
+
+function checkLock() {
+  const now = Date.now();
+  const idle = now - lastInput;
+  const away = hiddenSince === null ? 0 : now - hiddenSince;
+  if (vault.openBoxId() !== null && (idle >= IDLE_LOCK_MS || away >= AWAY_LOCK_MS)) {
+    autoLock(idle >= IDLE_LOCK_MS ? "Locked after 5 minutes without use." : "Locked because you left this tab.");
+  } else if (openedInvite && Math.max(idle, away) >= INVITE_LOCK_MS) {
+    autoLock("This invite was closed after 10 minutes, to keep the box safe. Ask for a new link.");
+  }
+}
+
+function autoLock(message: string) {
+  teardown();
+  void render().then(() => say(message));
+}
+
+for (const type of ["pointerdown", "keydown", "wheel", "touchstart", "scroll"]) {
+  window.addEventListener(type, () => (lastInput = Date.now()), { capture: true, passive: true });
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    hiddenSince = Date.now();
+  } else {
+    checkLock(); // before the person sees the page again
+    hiddenSince = null;
+  }
+});
+setInterval(checkLock, 15_000);
+
+// Leaving the page (another site, a reload, a closed tab): forget everything.
+// A browser that keeps the page for Back (the back/forward cache) shows it locked.
+window.addEventListener("pagehide", () => teardown());
+window.addEventListener("pageshow", (e) => {
+  if (e.persisted) void render();
+});
+// An opened invite is lost on a reload or a closed tab: ask first.
+window.addEventListener("beforeunload", (e) => {
+  if (!openedInvite) return;
+  e.preventDefault();
+  e.returnValue = ""; // older browsers ask only with this
+});
 
 const pathBoxId = () => location.pathname.match(/^\/box\/([\w-]+)/)?.[1] ?? null;
 
@@ -186,7 +336,7 @@ function topbar(open?: vault.Box) {
         class: "lock-button",
         "data-test": "lock",
         title: "Lock this box. You'll need your passkey to open it again.",
-        onclick: () => { vault.lock(); go("/"); },
+        onclick: () => { teardown(); go("/"); },
       }, icon("lock"), "Lock"),
   );
 }
@@ -209,10 +359,12 @@ function openButton(label: string, test: string) {
 
 async function homeView() {
   // A box that is open in this tab: offer the way back to it.
+  const gen = generation;
   const openId = vault.openBoxId();
   const openName = openId ? await vault.load().then((b) => b.name, () => null) : null;
+  if (gen !== generation) return; // locked while loading
 
-  const boxName = h("input", { placeholder: "Box name, e.g. Finance 2026", "aria-label": "Box name", "data-test": "box-name" });
+  const boxName = keepLocal(h("input", { placeholder: "Box name, e.g. Finance 2026", "aria-label": "Box name", "data-test": "box-name" }));
   const createBtn = h("button", { type: "submit", "data-test": "create-box" }, "Create box");
   const create = form({ class: "card" }, () =>
     act(createBtn, "Save the passkey when your device asks…", async () => {
@@ -252,29 +404,33 @@ type BoxCtx = { d: vault.Box; refresh: () => Promise<void> };
 const tabPath = (boxId: string, tab: Tab) => `/box/${boxId}${tab === "items" ? "" : `/${tab}`}`;
 
 async function boxView(boxId: string, tab: Tab) {
+  // A refresh that finishes after the person went to another page must not draw over it.
+  if (location.pathname !== tabPath(boxId, tab)) return;
   if (vault.openBoxId() !== boxId) {
     return show(
       topbar(),
       h("section", { class: "card gate" },
         icon("lock", "icon gate-icon"),
         h("h1", {}, "This box is locked"),
-        h("p", { class: "muted" }, "Open it with this box's passkey. It stays open until you lock it or close this tab."),
+        h("p", { class: "muted" }, "Open it with this box's passkey. It locks again when you lock it, close this tab, or leave it for a few minutes."),
         openButton("Open with passkey", "unlock"),
       ),
     );
   }
+  const gen = generation;
   let d: vault.Box;
   try {
     d = await vault.load();
   } catch (err) {
+    if (gen !== generation) return;
     if (err instanceof ApiError && err.status === 401) {
-      vault.lock();
+      teardown();
       return boxView(boxId, tab);
     }
     throw err;
   }
-  // A refresh that finishes after the person went to another page must not draw over it.
-  if (location.pathname !== tabPath(boxId, tab)) return;
+  // Locked, or the person went to another page, while it loaded: draw nothing.
+  if (gen !== generation || location.pathname !== tabPath(boxId, tab)) return;
   const ctx: BoxCtx = { d, refresh: () => boxView(boxId, tab) };
 
   const tabLink = (t: Tab, label: string, badge: string | number | null) => {
@@ -314,8 +470,8 @@ function itemsTab(ctx: BoxCtx): Child[] {
 
 function addTools({ d, refresh }: BoxCtx): Child[] {
   // New note: a small composer that opens in place.
-  const title = h("input", { placeholder: "e.g. Wi-Fi password", "data-test": "note-name" });
-  const text = h("textarea", { rows: 5, placeholder: "Write the secret here.", "data-test": "note-text" });
+  const title = keepLocal(h("input", { placeholder: "e.g. Wi-Fi password", "data-test": "note-name" }));
+  const text = keepLocal(h("textarea", { rows: 5, placeholder: "Write the secret here.", "data-test": "note-text" }), true);
   const save = h("button", { type: "submit", class: "primary", "data-test": "add-note" }, "Save note");
   const cancel = h("button", {}, "Cancel");
   const composer = form({ class: "card composer", hidden: true }, () =>
@@ -324,7 +480,7 @@ function addTools({ d, refresh }: BoxCtx): Child[] {
       const name = title.value.trim() || "Untitled note";
       await vault.addData(d, name, "text/plain", text.value);
       await refresh();
-      say(`Saved “${name}”. Only people in this box can read it.`, "ok");
+      return `Saved “${name}”. Only people in this box can read it.`;
     }),
     h("label", {}, "Title", title),
     h("label", {}, "Note", text),
@@ -337,7 +493,10 @@ function addTools({ d, refresh }: BoxCtx): Child[] {
     if (open) title.focus();
   };
   newNote.onclick = () => toggle(newNote.getAttribute("aria-expanded") !== "true");
-  cancel.onclick = () => toggle(false);
+  cancel.onclick = () => {
+    text.value = ""; // the secret must not wait in a hidden field
+    toggle(false);
+  };
 
   // Upload: one click opens the file picker; choosing a file uploads it.
   const fileInput = h("input", { type: "file", class: "visually-hidden", tabindex: "-1", "data-test": "file-input" });
@@ -354,7 +513,7 @@ function addTools({ d, refresh }: BoxCtx): Child[] {
         fileInput.value = ""; // so the same file can be chosen again
       }
       await refresh();
-      say(`Uploaded “${f.name}”. Only people in this box can read it.`, "ok");
+      return `Uploaded “${f.name}”. Only people in this box can read it.`;
     });
   };
 
@@ -386,22 +545,25 @@ function itemRow({ d, refresh }: BoxCtx, it: vault.Box["items"][number]) {
   row.onclick = () => {
     if (!viewer.hidden) return expand(false);
     if (viewer.childElementCount) return expand(true); // already unlocked once
+    const gen = generation;
     void act(row, "Opening…", async () => {
       const bytes = await vault.openItem(it.id);
+      if (gen !== generation) return; // locked while it loaded
       let text: string | null = null;
       try {
         if (bytes.length < 200_000) text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       } catch { /* binary */ }
-      const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: it.label?.type || "" }));
       let file = it.label?.name ?? `outside-${new Date(it.createdAt).toISOString().slice(0, 19)}${text !== null ? ".txt" : ".bin"}`;
       if (text !== null && !hasExt(file)) file += ".txt";
 
+      const download = h("button", { "data-test": "download" }, icon("download"), "Download");
+      download.onclick = () => saveFile(bytes, file);
       const del = h("button", { class: "link danger push", "data-test": "delete-item" }, "Delete");
       del.onclick = () => act(del, "Deleting…", async () => {
         if (!confirm(`Delete “${name}” for everyone in this box?`)) return;
         await vault.deleteItem(it.id);
         await refresh();
-        say(`Deleted “${name}”.`, "ok");
+        return `Deleted “${name}”.`;
       });
 
       viewer.replaceChildren(
@@ -410,7 +572,7 @@ function itemRow({ d, refresh }: BoxCtx, it: vault.Box["items"][number]) {
           : h("p", { class: "muted" }, "This file can't be shown here. Download it to open it."),
         h("div", { class: "buttons" },
           text !== null && copyButton(text, "Copy text"),
-          h("a", { class: "button", href: url, download: file }, icon("download"), "Download"),
+          download,
           del,
         ),
       );
@@ -449,7 +611,7 @@ function integrationTab({ d, refresh }: BoxCtx): Child[] {
       h("p", { class: "muted small" }, "A form or another app can put items in this box. It needs the public key and an add key below. It can add items, but it can't read anything."),
       h("div", { class: "label" }, "Public key (safe to share)"),
       h("pre", { "data-test": "box-recipient" }, d.publicKey),
-      h("div", { class: "buttons" }, copyButton(d.publicKey, "Copy public key")),
+      h("div", { class: "buttons" }, copyButton(d.publicKey, "Copy public key", {}, false)),
       h("div", { class: "label spaced" }, "Add key (keep it secret)"),
       h("p", { class: "small" }, d.hasAddKey ? "On. An app with the add key can add items." : "Off. No app can add items yet."),
       h("div", { class: "buttons" }, makeBtn, offBtn),
@@ -472,7 +634,7 @@ function peopleTab(ctx: BoxCtx): Child[] {
         if (!confirm(`Remove ${them}? They won't be able to open this box anymore. Anything they already saw or saved, they keep. To be fully safe, make a new box.`)) return;
         await vault.removeMember(m.credentialId);
         await refresh();
-        say(`${cap(them)} was removed.`, "ok");
+        return `${cap(them)} was removed.`;
       });
       return h("li", { class: "person", "data-test": "member" },
         h("span", { class: "avatar", "aria-hidden": "true" }, title.trim().charAt(0).toUpperCase() || "?"),
@@ -538,7 +700,7 @@ function shareDialog({ d, refresh }: BoxCtx) {
     if (e.target === dialog && ask.isConnected) dialog.close();
   });
 
-  const name = h("input", { placeholder: "e.g. Nok", autocomplete: "off", "data-test": "invite-name" });
+  const name = keepLocal(h("input", { placeholder: "e.g. Nok", "data-test": "invite-name" }));
   const ttl = h("select", {},
     h("option", { value: "1" }, "1 hour"), h("option", { value: "24", selected: true }, "24 hours"),
     h("option", { value: "72" }, "3 days"), h("option", { value: "168" }, "7 days"));
@@ -572,7 +734,7 @@ function shareDialog({ d, refresh }: BoxCtx) {
     }
   },
     h("h2", { id: "share-title" }, `Share “${d.name}”`),
-    h("p", { class: "muted small" }, "Make a one-time link for one person. The name is how they appear in this box."),
+    h("p", { class: "muted small" }, "Make a one-time link for one person. The name is how they appear in this box. Your device asks for your passkey first, because the link opens this box."),
     h("label", {}, "Their name", name),
     h("label", {}, "Link works for", ttl),
     error,
@@ -607,29 +769,39 @@ function shareDialog({ d, refresh }: BoxCtx) {
 // ---------------------------------------------------------------------------
 // Join
 
+/** An invite after "Open invite". It holds the box private key until Accept, so it lives only in memory. */
 let openedInvite: vault.OpenedInvite | null = null;
+/**
+ * The one-time key from the link. It leaves the address bar as soon as the page
+ * reads it, so it isn't on screen, in Back/Forward, or in a reopened tab.
+ */
+let pendingInvite: { id: string; key: string } | null = null;
 
 async function joinView(inviteId: string) {
-  const oneTimeKey = decodeURIComponent(location.hash.slice(1));
+  if (location.hash.length > 1) {
+    pendingInvite = { id: inviteId, key: decodeURIComponent(location.hash.slice(1)) };
+    history.replaceState(null, "", location.pathname);
+  }
   const card = (...rest: Child[]) =>
     show(topbar(), h("section", { class: "card join", "data-test": "join" }, h("p", { class: "eyebrow" }, icon("box"), "Invitation"), ...rest));
 
-  if (!oneTimeKey.startsWith("AGE-SECRET-KEY-1")) {
-    return card(h("h1", {}, "This link is incomplete"), h("p", { class: "error" }, "Open the full link exactly as it was sent."));
-  }
-
-  // A reload after "Open invite": the locked invite file is still in this tab.
-  if (openedInvite?.inviteId !== inviteId && sessionStorage.getItem(`invite:${inviteId}`)) {
-    openedInvite = await vault.openInvite(inviteId, oneTimeKey);
-  }
-
   if (openedInvite?.inviteId !== inviteId) {
+    const oneTimeKey = pendingInvite?.id === inviteId ? pendingInvite.key : "";
+    if (!oneTimeKey.startsWith("AGE-SECRET-KEY-1")) {
+      return card(
+        h("h1", {}, "Open the link from your message"),
+        h("p", { class: "muted", "data-test": "invite-needs-link" },
+          "This page needs the full link. Open it again from the message you got. If you already opened this invite, ask for a new link."),
+      );
+    }
     const openBtn = h("button", { class: "primary block", "data-test": "open-invite" }, "Open invite");
     openBtn.onclick = () => act(openBtn, "Opening the invite…", async () => {
       try {
         openedInvite = await vault.openInvite(inviteId, oneTimeKey);
+        pendingInvite = null; // used up: the opened invite has what it gave
       } catch (err) {
         if (!(err instanceof ApiError && err.status === 404)) throw err;
+        pendingInvite = null;
         // Used, expired or canceled: say so in place of the button.
         return card(
           h("h1", {}, "This link no longer works"),
@@ -643,7 +815,7 @@ async function joinView(inviteId: string) {
       h("h1", {}, "You're invited to a box"),
       h("p", { class: "muted" }, "Somebody sent you a private link to a box on Vault Box."),
       openBtn,
-      h("p", { class: "hint" }, "Opening the invite uses up this link, so nobody else can use it after you."),
+      h("p", { class: "hint" }, "Opening the invite uses up this link, so nobody else can use it after you. Then accept it here: a reload loses it."),
     );
   }
 
@@ -653,10 +825,9 @@ async function joinView(inviteId: string) {
     act(accept, "Save the passkey when your device asks…", async () => {
       const boxId = await vault.join(inv);
       openedInvite = null;
-      // Drop the one-time key from the address bar and the history entry.
       history.replaceState(null, "", `/box/${boxId}`);
       await render();
-      say(`You joined “${inv.boxName}”.`, "ok");
+      return `You joined “${inv.boxName}”.`;
     });
   card(
     // The box creator has no name; the person knows who sent them the link.

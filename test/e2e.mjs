@@ -207,12 +207,14 @@ async function person(name, { prfAtCreate = true } = {}) {
  * The link is shown only in the dialog, and is gone when it closes.
  */
 async function createInvite(member, name, { screenshot } = {}) {
+  // Release each element handle: DevTools keeps what a handle points to in
+  // memory, and here that would keep the link (and its key) alive for keysInMemory.
   await member.click("[data-test=share]");
-  await member.page.waitForSelector("dialog[open] [data-test=invite-name]");
+  await (await member.page.waitForSelector("dialog[open] [data-test=invite-name]")).dispose();
   await member.type("[data-test=invite-name]", name);
   if (screenshot) await shot(member, "2-share.png");
   await member.click("[data-test=create-invite]");
-  await member.page.waitForSelector("[data-test=invite-link]");
+  await (await member.page.waitForSelector("[data-test=invite-link]")).dispose();
   const link = await member.page.$eval("[data-test=invite-link]", (el) => el.value);
   if (screenshot) await shot(member, screenshot);
   await member.click("[data-test=share-done]");
@@ -221,15 +223,11 @@ async function createInvite(member, name, { screenshot } = {}) {
 }
 
 /** Opening the invite uses up the link. The invited person types nothing. */
-async function joinWith(p, link, expectedName, heading, { reloadAfterOpen = false } = {}) {
+async function joinWith(p, link, expectedName, heading) {
   await p.goto(link);
+  assert.ok(!p.page.url().includes("#"), "the one-time key should leave the address bar as soon as the page reads it");
   await p.click("[data-test=open-invite]");
   await p.waitText(heading);
-  if (reloadAfterOpen) {
-    // The link is used up now, but this tab kept the locked invite file.
-    await p.page.reload({ waitUntil: "networkidle0" });
-    await p.waitText(heading);
-  }
   assert.equal(await p.text("[data-test=invite-as]"), `You will appear as ${expectedName} in this box.`);
   assert.equal(await p.page.$("input"), null, "the join page should have no fields to fill in");
   await shot(p, `3-join-${expectedName}.png`);
@@ -241,6 +239,42 @@ async function joinWith(p, link, expectedName, heading, { reloadAfterOpen = fals
 const memberRow = (p, name) =>
   p.page.evaluate((n) => [...document.querySelectorAll("[data-test=member]")]
     .find((li) => li.querySelector(".row-main")?.textContent.startsWith(n))?.innerText ?? null, name);
+
+/**
+ * Every whole age private key (AGE-SECRET-KEY-1 + 58 bech32 characters) that is
+ * a string in this page's JavaScript memory, after a full garbage collection.
+ * An open box keeps its key as a non-extractable CryptoKey, and every other key
+ * string must be gone once it was used. (This can't see bytes in arrays: only strings.)
+ */
+async function keysInMemory(p) {
+  const chunks = [];
+  const onChunk = (e) => chunks.push(e.chunk);
+  p.cdp.on("HeapProfiler.addHeapSnapshotChunk", onChunk);
+  await p.cdp.send("HeapProfiler.enable");
+  await p.cdp.send("HeapProfiler.collectGarbage");
+  await p.cdp.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
+  p.cdp.off("HeapProfiler.addHeapSnapshotChunk", onChunk);
+  await p.cdp.send("HeapProfiler.disable");
+  return [...new Set(chunks.join("").match(/age-secret-key-1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58}/gi) ?? [])];
+}
+
+/**
+ * Acts as if the person left the tab (another app or tab) for this long, then
+ * came back: the page reads document.visibilityState and Date.now().
+ */
+async function leaveTab(p, ms) {
+  await p.page.evaluate((away) => {
+    let state = "hidden";
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+    document.dispatchEvent(new Event("visibilitychange"));
+    const realNow = Date.now;
+    Date.now = () => realNow() + away;
+    state = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+    Date.now = realNow;
+    delete document.visibilityState;
+  }, ms);
+}
 
 /** Opens the box with a passkey from the box page (1 prompt). */
 async function unlock(p) {
@@ -281,6 +315,20 @@ try {
   await (await tiger.page.$("[data-test=file-input]")).uploadFile(join(uploadDir, "contract.txt"));
   await tiger.waitItem("contract.txt");
   assert.equal(await tiger.open("contract.txt"), "Uploaded file body");
+  // Download makes a short-lived link to the unlocked bytes and saves the file.
+  const downloadDir = join(tmpdir(), `vault-box-e2e-download-${process.pid}`);
+  mkdirSync(downloadDir, { recursive: true });
+  await tiger.cdp.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloadDir });
+  await tiger.page.evaluate(() =>
+    [...document.querySelectorAll("[data-test=items] > li")]
+      .find((li) => li.querySelector(".row-main")?.textContent === "contract.txt")
+      .querySelector("[data-test=download]")
+      .click(),
+  );
+  const saved = join(downloadDir, "contract.txt");
+  for (let i = 0; i < 50 && !existsSync(saved); i++) await new Promise((r) => setTimeout(r, 200));
+  assert.equal(readFileSync(saved, "utf8"), "Uploaded file body", "Download should save the unlocked file");
+  rmSync(downloadDir, { recursive: true, force: true });
   await shot(tiger, "2-items.png");
   await tiger.page.evaluate(() =>
     [...document.querySelectorAll("[data-test=items] > li")]
@@ -291,20 +339,21 @@ try {
   await tiger.waitItem("contract.txt", true);
   rmSync(uploadDir, { recursive: true, force: true });
   assert.equal(tiger.total(), MAKE, "an open box opens and deletes items with no passkey prompt");
-  log("Tiger uploads a file, opens it and deletes it (0 prompts)");
+  log("Tiger uploads a file, opens it, downloads it and deletes it (0 prompts)");
 
   const nokLink = await createInvite(tiger, "Nok", { screenshot: "2-invite.png" });
   const spareLink = await createInvite(tiger, "Spare");
   assert.match(nokLink, new RegExp(`^${BASE}/join/[\\w-]+#AGE-SECRET-KEY-1[0-9A-Z]+$`));
-  assert.equal(tiger.total(), MAKE, "inviting should need no passkey prompt");
-  log("Tiger makes 2 invite links with Share, typing only a name (one-time key after #)");
+  assert.equal(tiger.total(), MAKE + 2, "each invite should ask for the passkey once: the link holds the box key");
+  log("Tiger makes 2 invite links with Share, typing only a name (1 prompt each; one-time key after #)");
 
   await createInvite(tiger, "Temp");
   assert.equal(await tiger.page.$("[data-test=invite-link]"), null, "a link must not stay on screen after the dialog closes");
+  assert.deepEqual(await keysInMemory(tiger), [], "no private key string may stay in memory after making invites");
   await tiger.tab("people");
   await tiger.click("[data-test=cancel-Temp]");
   await tiger.page.waitForFunction(() => !document.querySelector("[data-test=cancel-Temp]"));
-  log("Tiger closes the dialog (the link leaves the screen) and cancels that invite on People");
+  log("Tiger closes the dialog (the link and every key string leave memory) and cancels that invite on People");
 
   // A link preview bot fetches the page: that is a GET, and only a POST uses the invite.
   const preview = await fetch(nokLink.split("#")[0]);
@@ -313,15 +362,27 @@ try {
 
   const nok = await person("Nok");
   // Tiger typed no name, so the page doesn't name him. Nok knows who sent the link.
-  await joinWith(nok, nokLink, "Nok", "You're invited to “Finance 2026”", { reloadAfterOpen: true });
+  await joinWith(nok, nokLink, "Nok", "You're invited to “Finance 2026”");
   assert.equal(nok.total(), MAKE, "joining should take the same prompts as making a box");
   assert.ok(!nok.page.url().includes("#"), "the one-time key should be removed from the URL");
   assert.equal(await nok.open("note.txt"), "Salary sheet: Nok 50k");
+  assert.deepEqual(await keysInMemory(nok), [], "after joining, neither the box key nor the one-time key may stay as a string");
   await nok.tab("people");
   assert.match(await memberRow(nok, "Nok"), /Invited by the box creator/);
   assert.match(await memberRow(nok, "Box creator"), /Made this box/);
   await shot(nok, "4-member-box.png");
-  log("Nok opens the invite, reloads, joins without typing anything; she sees Tiger as the box creator");
+  log("Nok opens the invite and joins without typing anything; she sees Tiger as the box creator");
+
+  // An opened invite holds the box key, so the tab keeps it only in memory.
+  const pimLink = await createInvite(tiger, "Pim");
+  const pim = await person("Pim");
+  await pim.goto(pimLink);
+  await pim.click("[data-test=open-invite]");
+  await pim.waitText("You're invited to “Finance 2026”");
+  await pim.page.reload({ waitUntil: "networkidle0" }); // the page asks first; the test says yes
+  await pim.page.waitForSelector("[data-test=invite-needs-link]");
+  assert.equal(await pim.page.evaluate(() => sessionStorage.length), 0, "the tab must store nothing from the invite");
+  log("Pim opens an invite and reloads: the tab stored nothing, so nobody can open it there again");
 
   const mallory = await person("Mallory");
   await mallory.goto(nokLink);
@@ -335,7 +396,7 @@ try {
   await nok.addNote("nok.txt", "Added by Nok");
   const promptsBeforeInvite = nok.total();
   const beeLink = await createInvite(nok, "Bee");
-  assert.equal(nok.total() - promptsBeforeInvite, 0, "Nok's box is open, so inviting needs no prompt");
+  assert.equal(nok.total() - promptsBeforeInvite, 1, "inviting asks for the passkey once, also when the box is open");
   log("Nok adds a note and invites Bee herself (no roles)");
 
   const bee = await person("Bee", { prfAtCreate: false });
@@ -413,6 +474,16 @@ try {
   assert.equal(await bee.open("after.txt"), "Written after Nok left");
   log("Bee still reads old and new data, with nothing to do");
 
+  // --- Bee leaves the tab for 3 minutes: the box locks itself and forgets its key.
+  await leaveTab(bee, 3 * 60_000);
+  await bee.page.waitForSelector("[data-test=unlock]");
+  await bee.waitText("Locked because you left this tab");
+  assert.equal(await bee.page.$("[data-test=items]"), null, "a locked box shows nothing");
+  const beforeAway = bee.total();
+  await unlock(bee);
+  assert.equal(bee.total() - beforeAway, 1, "after the auto-lock, opening the box takes 1 prompt: the key was gone");
+  log("Bee leaves the tab for 3 minutes: the box locks itself, and opens again with 1 prompt");
+
   // --- The start page leads back to the box that is open in this tab
   await bee.click(".brand");
   await bee.page.waitForSelector("a.continue");
@@ -433,8 +504,10 @@ try {
   log("Bee locks the box and opens it again from the start page (1 prompt)");
 
   // --- A second box gets a second passkey. The passkey picked names the box.
+  assert.match(await tiger.text("#notice"), /after\.txt/);
   await tiger.click("[data-test=lock]");
   await tiger.page.waitForSelector("[data-test=box-name]");
+  assert.equal(await tiger.text("#notice"), "", "Lock must clear the notice: it can name an item");
   await tiger.type("[data-test=box-name]", "HR 2027");
   await tiger.click("[data-test=create-box]");
   await tiger.waitText("HR 2027");

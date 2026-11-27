@@ -54,7 +54,16 @@ export async function createPasskey(boxId: string, label: string): Promise<Passk
   if ((cred.getClientExtensionResults() as any).prf?.enabled !== true) throw Error(NO_PRF);
   const credentialId = keys.toB64url(new Uint8Array(cred.rawId));
   const secret = prfOutput(cred) ?? (await usePasskey([credentialId])).secret;
-  return { credentialId, boxId, key: await keys.keyPairFromSecret(secret) };
+  return { credentialId, boxId, key: await keyPairOnce(secret) };
+}
+
+/** The passkey key from the PRF output. Then the output bytes are zeroed: they are a private key. */
+async function keyPairOnce(secret: Uint8Array): Promise<keys.KeyPair> {
+  try {
+    return await keys.keyPairFromSecret(secret);
+  } finally {
+    secret.fill(0);
+  }
 }
 
 /**
@@ -63,8 +72,11 @@ export async function createPasskey(boxId: string, label: string): Promise<Passk
  */
 export async function getPasskey(allow?: string[]): Promise<Passkey> {
   const { credentialId, boxId, secret } = await usePasskey(allow);
-  if (!boxId) throw Error("This passkey was not made by Vault Box.");
-  return { credentialId, boxId, key: await keys.keyPairFromSecret(secret) };
+  if (!boxId) {
+    secret.fill(0);
+    throw Error("This passkey was not made by Vault Box.");
+  }
+  return { credentialId, boxId, key: await keyPairOnce(secret) };
 }
 
 async function usePasskey(allow: string[] = []) {

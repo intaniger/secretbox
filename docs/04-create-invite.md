@@ -6,18 +6,19 @@
 
 Tiger invites Nok to "Finance 2026". He types her name, "Nok". The browser puts a copy of the box private key in an **invite file**, and locks it with a new **one-time key**. The one-time private key goes into the link, after the `#` sign. The server gets the invite file, but never the `#` part.
 
-Any member can make an invite link. When the box is open, this needs no Face ID.
+Any member can make an invite link. It needs one Face ID, also when the box is open: the link gives the box private key to the person who opens it.
 
 ## What Tiger sees
 
 1. In the box, select **Share** (next to the box name). On the **People** tab, **Invite someone** does the same.
 2. Type "Nok". The link works for 24 hours. To change this, choose another time under **Link works for**.
-3. Select **Create link**.
+3. Select **Create link**. Confirm with Face ID.
 4. Select **Copy link**, or **Share…** on a phone. Send the link to Nok in a private chat. Then select **Done**: the link is shown only this one time.
 5. On the **People** tab, "Nok" shows under **Invites not used yet**, with **Cancel**.
 
 ## What happens, in plain words
 
+0. Tiger's passkey unlocks his envelope again. This gives the box private key, for this invite only.
 1. The browser makes a new key pair: the **one-time key**.
 2. The browser writes the invite contents: the box private key, the name "Nok" and Tiger's name in the box. Tiger's name is empty, because nobody named the box creator.
 3. The one-time public key locks the contents. The result is the **invite file**.
@@ -33,6 +34,10 @@ sequenceDiagram
   participant B as Browser
   participant S as Server
   T->>B: Nok, 24 hours, Create link
+  B->>T: Face ID
+  B->>S: GET /api/boxes/BOX_ID/envelopes/CREDENTIAL_ID
+  S-->>B: Tiger's envelope
+  Note over B: I0. Unlock the envelope: the box private key, for this invite only
   Note over B: I1. One-time key pair. I2. Contents. I3. Invite file. I4. Name file
   B->>S: I5. POST /api/boxes/BOX_ID/invites with the access key
   Note over S: Keep the invite file, the name file and the time limit
@@ -46,7 +51,7 @@ sequenceDiagram
 ```mermaid
 flowchart TD
   I1["I1. One-time key pair"] -->|public key| I3["I3. Invite file"]
-  BK["Box private key<br/>in tab memory"] --> I2["I2. Contents"]
+  BK["I0. Box private key<br/>from the envelope, with Face ID"] --> I2["I2. Contents"]
   NM["Nok, and Tiger's empty name"] --> I2
   I2 --> I3
   NM --> I4["I4. Name file"]
@@ -61,8 +66,9 @@ flowchart TD
 
 | Step | Input | Method | Output | Goes to |
 |---|---|---|---|---|
+| I0. The box private key again | Tiger's passkey of this box, and Face ID. His envelope from the server. | WebAuthn `navigator.credentials.get` with the PRF extension, for this one passkey. Then the envelope is unlocked as in [step O4](02-open-box.md). The browser checks that the key gives the box public key. | The box private key `AGE-SECRET-KEY-1Z84DDGND8U…` | I2 |
 | I1. One-time key pair | Random bytes. | X25519 key generation. | Private key `AGE-SECRET-KEY-15ZZXCTU7YG…`. Public key `age1rudeyrnftezyrzjt…` | I3 (public key), I6 (private key) |
-| I2. Contents | The box private key, from tab memory. The name "Nok". Tiger's name in the box, from Tiger's name file: empty. | JSON text. | `{"boxKey":"AGE-SECRET-KEY-1Z84DDGND8U…","name":"Nok","invitedBy":""}` (115 bytes) | I3 |
+| I2. Contents | The box private key (I0). The name "Nok". Tiger's name in the box, from Tiger's name file: empty. | JSON text. | `{"boxKey":"AGE-SECRET-KEY-1Z84DDGND8U…","name":"Nok","invitedBy":""}` (115 bytes) | I3 |
 | I3. Invite file | The contents (I2). The one-time public key (I1). | The age recipe with an X25519 stanza: file key `a01d2d96…`, temporary public part `oj15APQX12n1+USE…`, shared secret `369099b0e90abfc7…`, wrap key `a4b996d0ffb5cdea…`. | The invite file, 315 bytes. | I5 |
 | I4. Name file | The text `{"name":"Nok","invitedBy":""}`. The box public key. | The age recipe with an X25519 stanza. | The name file, 229 bytes. | I5 |
 | I5. Send | The invite file (I3). The name file (I4). The time limit. The access key. | `POST /api/boxes/:id/invites` | The server keeps one row. It gives back the invite ID `crUC8B9PQQSYQ_-CBMvj7A`. | I6 |
@@ -93,6 +99,8 @@ dmlJPvQBuCydznNRdO5LHY6Z3KuHrfhbj4LsYshaQFA
 
 **Why two parts.** The server has the invite file, but not the key. The link has the key, but not the invite file. A person needs both parts to get the box private key.
 
+**Why Face ID for each link.** A link gives the box private key to the person who opens it first, and nobody can take that key back ([flaw 2](08-security.md#2-removal-deletes-only-the-envelope)). So a person who finds Tiger's box open on his phone must not make a link for themselves. Also, the open box keeps its key as a key object that scripts cannot copy. To put the key into an invite file, the browser unlocks the envelope again.
+
 **Why the browser forgets the one-time private key.** The link is the only copy. Tiger's browser shows the link one time. The browser cannot show a lost link again. Tiger then makes a new link.
 
 ## Cancel an invite
@@ -109,11 +117,11 @@ The member selects 1 hour, 24 hours, 3 days or 7 days. The server stops the clai
 |---|---|
 | Server | One row: the invite ID, the box ID, the invite file, the name file and the time limit. |
 | The link (in Tiger's chat with Nok) | The invite ID and the one-time private key. |
-| Tiger's browser | Nothing. It forgets the one-time private key. |
+| Tiger's browser | Nothing. It forgets the one-time private key and this copy of the box private key. |
 
 | Action | Face ID |
 |---|---|
-| Make an invite link (box open) | 0 |
+| Make an invite link (box open) | 1 |
 
 ## Technical details
 
